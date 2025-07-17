@@ -1,5 +1,9 @@
 #### 介绍
 
+## 特别说明
+
+更新可能不及时
+
 # xiaoyao-cvs-plugin
 
 yunzai-bot扩展图鉴以及体力优化;
