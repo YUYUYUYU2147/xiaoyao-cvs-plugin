@@ -1,0 +1,23 @@
+$:
+  vscode:
+    - docker:
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/plugins/git:latest
+      services:
+        - vscode
+        - docker
+      stages:
+        - name: Install dependencies
+          script: |
+                  apt-get update
+                  apt-get install -y git rsync
+        - name: git remote
+          script: |
+                  git remote add github https://github.com/ctrlcvs/xiaoyao-cvs-plugin
+                  git remote -v
+        - name: fetch
+          script: |
+                  git fetch github
+        - name: pull
+          script: |
+                  git checkout master
+                  git merge github/master
