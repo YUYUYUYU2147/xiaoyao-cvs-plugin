@@ -1,7 +1,7 @@
 $:
   vscode:
     - docker:
-        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/plugins/git:latest
+        image: git:latest
       services:
         - vscode
         - docker
