@@ -512,6 +512,8 @@ export default class miHoYoApi {
           "x-rpc-client_type": "4",
           "x-rpc-device_id": "3b401c79-e221-46b9-8ca5-2e072e367333",
           "x-rpc-language": "zh-cn",
+          "x-rpc-combo_version": "2.48.0",
+					"x-rpc-trade_type": "3",
           Cookie: this.cookie,
         }
         break
