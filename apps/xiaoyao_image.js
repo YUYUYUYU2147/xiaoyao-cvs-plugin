@@ -3,6 +3,7 @@ import { Cfg } from "../components/index.js"
 import gsCfg from "../model/gsCfg.js"
 import { isV3 } from "../components/Changelog.js"
 import utils from "../model/mys/utils.js"
+
 const _path = process.cwd()
 
 const list = [
@@ -22,7 +23,13 @@ const reglist = [
   "(#|图鉴|道具)",
 ]
 let pathPlus = `${_path}/plugins/xiaoyao-cvs-plugin/resources/xiaoyao-plus/`
+
 export async function AtlasAlias(e) {
+  if (e.msg.startsWith("#幻影") || e.msg.startsWith("#动态")) {
+    await handlePhantomDynamic(e)
+    return false
+  }
+
   if (!Cfg.get("Atlas.all")) {
     return false
   }
@@ -40,8 +47,30 @@ export async function AtlasAlias(e) {
   return send_Msg(e, "all", "")
 }
 
+async function handlePhantomDynamic(e) {
+    let name = e.msg.replace(/#|＃|幻影|动态|信息|图鉴| /g, "").trim()
+    if (!name) {
+      await e.reply("请输入正确格式：#幻影+角色名 或 #动态+角色名（例如：#幻影阿贝多）")
+      return
+    }
+
+    const basePath = `${_path}/plugins/xiaoyao-cvs-plugin/resources/xiaoyao-plus/basicInfo_tujian/role/${name}`
+    const imgPath = `${basePath}/${name}.webp`
+    const videoPath = `${basePath}/${name}.mp4`
+
+    if (fs.existsSync(videoPath)) {
+      await e.reply([segment.video(`file://${videoPath}`)])
+      await redis.set(`xiaoyao:basic:${e.message_id}`, videoPath, 10800)
+    } else if (fs.existsSync(imgPath)) {
+      await e.reply([segment.image(`file://${imgPath}`)])
+      await redis.set(`xiaoyao:basic:${e.message_id}`, imgPath, 10800)
+    }
+
+    return false
+  }
+
 async function getBasicEvent(e) {
-  if (!/原牌|七圣召唤|七圣|动态|幻影/.test(e.msg)) return false //为了避免抢夺其他指令
+  if (!/原牌|七圣召唤|七圣|动态|幻影/.test(e.msg)) return false
   let msg = e.msg.replace(/#|＃|信息|图鉴|原牌|七圣召唤|七圣|动态|幻影/g, "")
   let name, type
   let list = gsCfg.getfileYaml(
@@ -66,15 +95,12 @@ export async function getBasicVoide(e) {
   if (!e.hasReply && !e.source) {
     return true
   }
-  // 引用的消息不是自己的消息
   if (e.source.user_id !== e.self_id) {
     return true
   }
-  // 引用的消息不是纯图片
   if (!/^\[图片]$/.test(e.source.message)) {
     return true
   }
-  // 获取原消息
   let source
   if (e.isGroup) {
     source = (await e.group.getChatHistory(e.source.seq, 1)).pop()
@@ -89,7 +115,6 @@ export async function getBasicVoide(e) {
     }
     if (source.time) {
       let time = new Date()
-      // 对at错图像的增加嘲讽...
       if (time / 1000 - source.time < 3600) {
         e.reply([
           segment.image(process.cwd() + "/plugins/miao-plugin/resources/common/face/what.jpg"),
@@ -101,6 +126,7 @@ export async function getBasicVoide(e) {
   e.reply("消息太过久远了，俺也忘了动态是啥了，下次早点来吧~")
   return true
 }
+
 export async function roleInfo(e) {
   let msg = e.msg.replace(/#|＃|信息|图鉴|命座|天赋|原牌|七圣召唤|七圣|动态|幻影/g, "")
   let Botcfg,
@@ -190,6 +216,7 @@ const send_Msg = async function (e, type, name) {
   await redis.set(`xiaoyao:basic:${message_id}`, path.replace(/\.webp|\.jpg/, ".mp4"), 10800) //三小时
   return true
 }
+
 export async function Atlas_list(e) {
   let list = gsCfg.getfileYaml(
     `${_path}/plugins/xiaoyao-cvs-plugin/resources/Atlas_alias/`,

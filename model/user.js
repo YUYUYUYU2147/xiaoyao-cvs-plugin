@@ -867,7 +867,7 @@ export default class user {
         v2Sk = await this.getData("getByStokenV2", { headers: { Cookie: this.cookies } }, false)
       }
       let list = []
-      for (let item of ["崩坏星穹铁道", "原神", "绝区零"]) {
+      for (let item of ["崩坏3", "崩坏星穹铁道", "原神", "绝区零"]) {
         let result = await this.getData("userGameInfo", this.getDataList(item)[0], false)
         if (result?.retcode != 0) {
           continue

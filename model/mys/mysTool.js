@@ -239,6 +239,8 @@ const boards = {
   zzz: {
     forumid: 57,
     name: "绝区零",
+    biz: "nap_cn",
+    osbiz: "nap_global",
     url: "https://bbs.mihoyo.com/zzz/",
     signUrl(data, type, api) {
       //预留方法方便后续迭代
@@ -249,6 +251,36 @@ const boards = {
       return ``
     },
   },
+  hna: {
+    forumid: "948",
+    name: "崩坏因缘精灵",
+    biz: "abc_cn",
+    osbiz: "abc_global",
+    url: "https://bbs.mihoyo.com/hna/",
+    signUrl(data, type, api) {
+      //预留方法方便后续迭代
+      let dataUrl = {}
+      return dataUrl
+    },
+    getReferer() {
+      return ``
+    },
+  },
+  planet: {
+    forumid: "951",
+    name: "星布谷地",
+    biz: "hyg_cn",
+    osbiz: "hyg_global",
+    url: "https://bbs.mihoyo.com/planet/",
+    signUrl(data, type, api) {
+      //预留方法方便后续迭代
+      let dataUrl = {}
+      return dataUrl
+    },
+    getReferer() {
+      return ``
+    },
+  }
 }
 export default {
   APP_VERSION,

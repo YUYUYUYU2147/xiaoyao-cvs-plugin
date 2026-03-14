@@ -2,7 +2,7 @@ import fs from "fs"
 import lodash from "lodash"
 
 const _path = process.cwd()
-const _cfgPath = `${_path}/plugins/xiaoyao-cvs-plugin/components/`
+const _cfgPath = `${_path}/plugins/xiaoyao-cvs-plugin/config/`
 let cfg = {}
 
 try {
