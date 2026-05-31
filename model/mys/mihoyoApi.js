@@ -102,207 +102,188 @@ export default class miHoYoApi {
       return false
     }
 
-    let res = await response.text()
-    // Bot.logger.mark(`[接口][${type}][${this.e.uid}] ${Date.now() - start}ms\n${res}`)
-    if (res.startsWith("(")) {
-      res = JSON.parse(res.replace(/\(|\)/g, ""))
-    } else {
-      res = JSON.parse(res)
-    }
-    if (!res) {
-      Bot.logger.mark("mys接口没有返回")
-      return false
-    }
-    if (res.retcode !== 0) {
-      Bot.logger.debug(`[米游社接口][请求参数] ${url} ${JSON.stringify(param)}`)
-    }
-    res.api = type
-    if (type == "loginByPassword") {
-      res.aigis_data = JSON.parse(response.headers.get("x-rpc-aigis"))
-    }
-    return res
-  }
-  getUrl(type, board, data) {
-    // if(/qrCodeLogin|qrCodeQuery|getTokenByGameToken|getCookieAccountInfoByGameToken/.test(type)) this.isOs=false;
-    let urlMap = {
-      userGameInfo: {
-        //通用查询
-        url: `${this.apiMap.apiWeb}/binding/api/getUserGameRolesByCookie`,
-        query: `game_biz=${this.isOs ? board?.osbiz : board?.biz}`,
-        types: "sign",
-      },
-      isSign: board?.signUrl(data, "isSign", this.apiMap.apiWeb) || {},
-      sign: board?.signUrl(data, "sign", this.apiMap.apiWeb) || {},
-      home: board?.signUrl(data, "home", this.apiMap.apiWeb) || {},
-      //bbs接口 hoyolab那边不是很需要 这边不进行优化处理
-      bbsisSign: {
-        //bbs 签到 （状态查询 米游币查询）
-        url: `${mys.bbs_api}/apihub/sapi/getUserMissionsState`,
-        types: "bbs",
-      },
-      bbsSign: {
-        //bbs讨论区签到
-        url: `${mys.bbs_api}/apihub/app/api/signIn`,
-        body: {
-          gids: data.forumId * 1,
-        },
-        sign: true,
-        types: "bbs",
-      },
-      bbsGetCaptcha: {
-        url: `${mys.bbs_api}/misc/api/createVerification`,
-        query: `is_high=false`,
-        types: "bbs",
-      },
-      bbsValidate: {
-        url: `https://apiv6.geetest.com/ajax.php`,
-        query: `gt=${data.gt}&challenge=${data.challenge}&lang=zh-cn&pt=3&client_type=web_mobile`,
-      },
-      bbsCaptchaVerify: {
-        url: `${mys.bbs_api}/misc/api/verifyVerification`,
-        body: {
-          geetest_challenge: data.challenge, //challenge,
-          geetest_validate: data.validate,
-          geetest_seccode: `${data.validate}|jordan`,
-        },
-        types: "bbs",
-      },
-      geeType: {
-        url: `https://api.geetest.com/gettype.php`,
-        query: `gt=${data.gt}`,
-      },
-      //待定接口 用于获取用户米游社顶部的模块栏
-      bbs_Businesses_url: {
-        url: `${mys.bbs_api}/user/api/getUserBusinesses`,
-        query: `uid={}`, //????
-      },
-      bbsPostList: {
-        //bbs讨论区签到
-        url: `${mys.bbs_api}/post/api/getForumPostList`,
-        query: `forum_id=${data.forumId}&is_good=false&is_hot=false&page_size=20&sort_type=1`,
-        types: "bbs",
-      },
-      bbsPostFull: {
-        //bbs讨论区签到
-        url: `${mys.bbs_api}/post/api/getPostFull`,
-        query: `post_id=${data.postId}`,
-        types: "bbs",
-      },
-      bbsShareConf: {
-        //bbs讨论区签到
-        url: `${mys.bbs_api}/apihub/api/getShareConf`,
-        query: `entity_id=${data.postId}&entity_type=1`,
-        types: "bbs",
-      },
-      bbsVotePost: {
-        //bbs讨论区签到
-        url: `${mys.bbs_api}/apihub/sapi/upvotePost`,
-        body: {
-          post_id: data.postId,
-          is_cancel: false,
-        },
-        types: "bbs",
-      },
-      bbsGetCookie: {
-        url: `${this.apiMap.apiWeb}/auth/api/getCookieAccountInfoBySToken`,
-        query: `game_biz=hk4e_cn&${data.cookies}`,
-        types: "",
-      },
-      bbsStoken: {
-        url: `${this.apiMap.apiWeb}/auth/api/getMultiTokenByLoginTicket`,
-        query: `login_ticket=${data.loginTicket}&token_types=3&uid=${data.loginUid}`,
-        types: "stoken",
-      },
-      //很抱歉由于有人恶意倒卖，不得已只能是关闭免费token了 开放免费供人使用还被恶意倒卖指责 开源确实不好弄捏
-      validate: {
-        url: `http://api.fuckmys.tk/geetest`,
-        query: `token=${data?.getToken}&gt=${data.gt}&challenge=${data.challenge}`,
-      },
-      cloudLogin: {
-        url: `${mys.cloud_api}/hk4e_cg_cn/gamer/api/login`,
-        types: "cloud",
-      },
-      cloudReward: {
-        url: `${mys.cloud_api}/hk4e_cg_cn/gamer/api/listNotifications`,
-        query: `status=NotificationStatusUnread&type=NotificationTypePopup&is_sort=true`,
-        types: "cloud",
-      },
-      cloudGamer: {
-        url: `${mys.cloud_api}/hk4e_cg_cn/gamer/api/ackNotification`,
-        body: {
-          id: data.reward_id,
-        },
-        types: "cloud",
-      },
-      cloudGet: {
-        url: `${mys.cloud_api}/hk4e_cg_cn/wallet/wallet/get`,
-        types: "cloud",
-      },
-      authKey: {
-        ///account/auth/api/genAuthKey
-        url: `${this.apiMap.apiWeb}/binding/api/genAuthKey`,
-        // url:`https://gameapi-account.mihoyo.com/binding/api/genAuthKey`,
-        body: {
-          auth_appid: data.auth_appid ?? "webview_gacha", //'apicdkey',// 'webview_gacha',
-          game_biz: this.isOs ? "hk4e_global" : "hk4e_cn",
-          game_uid: this.e.uid * 1,
-          region: this.e.region,
-        },
-        types: "authKey",
-      },
-      getLtoken: {
-        url: `${mys.pass_api}/account/auth/api/getLTokenBySToken`,
-        query: `${data?.cookies?.replace(/;/g, "&")}`,
-      },
-      //用于手动过验证码，账号密码登录需要
-      microgg: {
-        url: `https://challenge.minigg.cn/manual/index.html`,
-        query: `gt=${data.gt}&challenge=${data.challenge}`,
-      },
-      microggVl: {
-        url: `https://challenge.minigg.cn/manual/`,
-        query: `callback=${data.challenge}`,
-      },
-      loginByPassword: {
-        url: `${mys.pass_api}/account/ma-cn-passport/app/loginByPassword`,
-        body: {
-          account: this.encrypt_data(data.account),
-          password: this.encrypt_data(data.password),
-        },
-        types: "pass",
-      },
-      qrCodeLogin: {
-        url: `${mys.hk4_sdk}/hk4e_cn/combo/panda/qrcode/fetch`,
-        body: {
-          app_id: mys.app_id,
-          device: data.device,
-        },
-      },
-      qrCodeQuery: {
-        url: `${mys.hk4_sdk}/hk4e_cn/combo/panda/qrcode/query`,
-        body: {
-          app_id: mys.app_id,
-          device: data.device,
-          ticket: data.ticket,
-        },
-      },
-      getTokenByGameToken: {
-        url: `${mys.pass_api}/account/ma-cn-session/app/getTokenByGameToken`,
-        body: {
-          account_id: data.uid * 1,
-          game_token: data.token,
-        },
-        types: "pass",
-      },
-			exchange: {
-				url: `${mys.pass_api}/account/ma-cn-session/app/exchange`,
+		let res = await response.text();
+		// Bot.logger.mark(`[接口][${type}][${this.e.uid}] ${Date.now() - start}ms\n${res}`)
+		if (res.startsWith('(')) {
+			res = JSON.parse((res).replace(/\(|\)/g, ""))
+		} else {
+			res = JSON.parse(res)
+		}
+		if (!res) {
+			Bot.logger.mark('mys接口没有返回')
+			return false
+		}
+		if (res.retcode !== 0) {
+			Bot.logger.debug(`[米游社接口][请求参数] ${url} ${JSON.stringify(param)}`)
+		}
+		res.api = type
+		if (type == "loginByPassword") {
+			res.aigis_data = JSON.parse(response.headers.get("x-rpc-aigis"))
+		}
+		return res
+	}
+	getUrl(type, board, data) {
+		// if(/qrCodeLogin|qrCodeQuery|getTokenByGameToken|getCookieAccountInfoByGameToken/.test(type)) this.isOs=false;
+		let urlMap = {
+			userGameInfo: { //通用查询
+				url: `${this.apiMap.apiWeb}/binding/api/getUserGameRolesByCookie`,
+				query: `game_biz=${this.isOs ? board?.osbiz : board?.biz}`,
+				types: 'sign'
+			},
+			isSign: board?.signUrl(data, "isSign", this.apiMap.apiWeb) || {},
+			sign: board?.signUrl(data, "sign", this.apiMap.apiWeb) || {},
+			home: board?.signUrl(data, "home", this.apiMap.apiWeb) || {},
+			//bbs接口 hoyolab那边不是很需要 这边不进行优化处理
+			bbsisSign: { //bbs 签到 （状态查询 米游币查询）
+				url: `${mys.bbs_api}/apihub/sapi/getUserMissionsState`,
+				types: 'bbs'
+			},
+			bbsSign: { //bbs讨论区签到
+				url: `${mys.bbs_api}/apihub/app/api/signIn`,
 				body: {
-					"src_token": {
-						"token": data.token,
-						"token_type": 1
-					},
-					"mid": data.mid,
-					"dst_token_type": 2
+					gids: data.forumId * 1
+				},
+				sign: true,
+				types: 'bbs'
+			},
+			bbsGetCaptcha: {
+				url: `${mys.bbs_api}/misc/api/createVerification`,
+				query: `is_high=false`,
+				types: 'bbs'
+			},
+			bbsValidate: {
+				url: `https://apiv6.geetest.com/ajax.php`,
+				query: `gt=${data.gt}&challenge=${data.challenge}&lang=zh-cn&pt=3&client_type=web_mobile`,
+			},
+			bbsCaptchaVerify: {
+				url: `${mys.bbs_api}/misc/api/verifyVerification`,
+				body: {
+					"geetest_challenge": data.challenge, //challenge,
+					"geetest_validate": data.validate,
+					"geetest_seccode": `${data.validate}|jordan`
+				},
+				types: 'bbs'
+			},
+			geeType: {
+				url: `https://api.geetest.com/gettype.php`,
+				query: `gt=${data.gt}`
+			},
+			//待定接口 用于获取用户米游社顶部的模块栏
+			bbs_Businesses_url: {
+				url: `${mys.bbs_api}/user/api/getUserBusinesses`,
+				query: `uid={}` //????
+			},
+			bbsPostList: { //bbs讨论区签到
+				url: `${mys.bbs_api}/post/api/getForumPostList`,
+				query: `forum_id=${data.forumId}&is_good=false&is_hot=false&page_size=20&sort_type=1`,
+				types: 'bbs'
+			},
+			bbsPostFull: { //bbs讨论区签到
+				url: `${mys.bbs_api}/post/api/getPostFull`,
+				query: `post_id=${data.postId}`,
+				types: 'bbs'
+			},
+			bbsShareConf: { //bbs讨论区签到
+				url: `${mys.bbs_api}/apihub/api/getShareConf`,
+				query: `entity_id=${data.postId}&entity_type=1`,
+				types: 'bbs'
+			},
+			bbsVotePost: { //bbs讨论区签到
+				url: `${mys.bbs_api}/apihub/sapi/upvotePost`,
+				body: {
+					"post_id": data.postId,
+					"is_cancel": false
+				},
+				types: 'bbs'
+			},
+			bbsGetCookie: {
+				url: `${this.apiMap.apiWeb}/auth/api/getCookieAccountInfoBySToken`,
+				query: `game_biz=hk4e_cn&${data.cookies}`,
+				types: ''
+			},
+			bbsStoken: {
+				url: `${this.apiMap.apiWeb}/auth/api/getMultiTokenByLoginTicket`,
+				query: `login_ticket=${data.loginTicket}&token_types=3&uid=${data.loginUid}`,
+				types: 'stoken'
+			},
+			//很抱歉由于有人恶意倒卖，不得已只能是关闭免费token了 开放免费供人使用还被恶意倒卖指责 开源确实不好弄捏
+			validate: {
+				url: `http://api.fuckmys.tk/geetest`,
+				query: `token=${data?.getToken}&gt=${data.gt}&challenge=${data.challenge}`
+			},
+			cloudLogin: {
+				url: `${mys.cloud_api}/hk4e_cg_cn/gamer/api/login`,
+				types: 'cloud'
+			},
+			cloudReward: {
+				url: `${mys.cloud_api}/hk4e_cg_cn/gamer/api/listNotifications`,
+				query: `status=NotificationStatusUnread&type=NotificationTypePopup&is_sort=true`,
+				types: 'cloud'
+			},
+			cloudGamer: {
+				url: `${mys.cloud_api}/hk4e_cg_cn/gamer/api/ackNotification`,
+				body: {
+					id: data.reward_id
+				},
+				types: 'cloud'
+			},
+			cloudGet: {
+				url: `${mys.cloud_api}/hk4e_cg_cn/wallet/wallet/get`,
+				types: 'cloud'
+			},
+			authKey: {
+				///account/auth/api/genAuthKey
+				url: `${this.apiMap.apiWeb}/binding/api/genAuthKey`,
+				// url:`https://gameapi-account.mihoyo.com/binding/api/genAuthKey`,
+				body: {
+					'auth_appid':data.auth_appid ?? 'webview_gacha',//'apicdkey',// 'webview_gacha',
+					'game_biz': this.isOs ? 'hk4e_global' : 'hk4e_cn',
+					'game_uid': this.e.uid * 1,
+					'region': this.e.region,
+				},
+				types: 'authKey'
+			},
+			getLtoken: {
+				url: `${mys.pass_api}/account/auth/api/getLTokenBySToken`,
+				query: `${data?.cookies?.replace(/;/g,'&')}`,
+			},
+			//用于手动过验证码，账号密码登录需要
+			microgg: {
+				url: `https://challenge.minigg.cn/manual/index.html`,
+				query: `gt=${data.gt}&challenge=${data.challenge}`
+			},
+			microggVl: {
+				url: `https://challenge.minigg.cn/manual/`,
+				query: `callback=${data.challenge}`
+			},
+			loginByPassword: {
+				url: `${mys.pass_api}/account/ma-cn-passport/app/loginByPassword`,
+				body: {
+					account: this.encrypt_data(data.account),
+					password: this.encrypt_data(data.password)
+				},
+				types: 'pass'
+			},
+			qrCodeLogin: {
+				url: `${mys.hk4_sdk}/hk4e_cn/combo/panda/qrcode/fetch`,
+				body: {
+					app_id: mys.app_id,
+					device: data.device
+				}
+			},
+			qrCodeQuery: {
+				url: `${mys.hk4_sdk}/hk4e_cn/combo/panda/qrcode/query`,
+				body: {
+					app_id: mys.app_id,
+					device: data.device,
+					ticket: data.ticket
+				}
+			},
+			getTokenByGameToken: {
+				url: `${mys.pass_api}/account/ma-cn-session/app/getTokenByGameToken`,
+				body: {
+					account_id: data.uid * 1,
+					game_token: data.token
 				},
 				types: 'pass'
 			},
