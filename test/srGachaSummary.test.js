@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { SR_GACHA_COMMAND, SR_GACHA_COOKIE_COMMAND, SR_GACHA_REIMPORT_PROMPT, formatSrGachaFailure, mergeSrSummary, normalizeSrRecords, SrGachaSummary, getSrRegion, validateSrCredentials, withFileLock, isSuccessfulReply, readSummary, readSrGachaCookie, saveSrGachaCookie, saveSummary, sanitizeSrGachaCookieLog } from "../model/srGachaSummary.js"
+import { SR_GACHA_COMMAND, SR_GACHA_COOKIE_COMMAND, SR_GACHA_REIMPORT_PROMPT, formatSrGachaFailure, mergeSrSummary, normalizeSrCookie, normalizeSrRecords, SrGachaSummary, getSrRegion, validateSrCredentials, withFileLock, isSuccessfulReply, readSummary, readSrGachaCookie, saveSrGachaCookie, saveSummary, sanitizeSrGachaCookieLog } from "../model/srGachaSummary.js"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -110,12 +110,20 @@ test("完整跃迁 Cookie 导入命令只接受私聊形态并安全保存", () 
   const reg = new RegExp(SR_GACHA_COOKIE_COMMAND)
   assert.equal(reg.test("*绑定跃迁Cookie " + cookie), true)
   assert.equal(reg.test("#星铁绑定跃迁Cookie " + cookie), true)
+  assert.equal(reg.test("*绑定跃迁Cookie\\nCookie: account_id=account\\nCookie: ltoken_v2=ltoken"), true)
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sr-cookie-test-"))
   const file = path.join(dir, "10001.cookie")
   saveSrGachaCookie(file, cookie)
   assert.equal(readSrGachaCookie(file), cookie)
   assert.equal(fs.statSync(file).mode & 0o777, 0o600)
   fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test("兼容 HttpCanary 多条 Cookie 头和代码块包装", () => {
+  const input = `\`\`\`text\nCookie: account_id=account\nCookie: ltoken_v2=ltoken\ncookie_token_v2=cookie; account_mid_v2=mid\ne_hkrpg_token=hkrpg; DEVICEFP=fp\n_MHYUUID=device-id; mi18nLang=zh-cn\n\`\`\``
+  const normalized = normalizeSrCookie(input)
+  assert.match(normalized, /^account_id=account;ltoken_v2=ltoken;/)
+  assert.doesNotThrow(() => validateSrCredentials(input, "device-id"))
 })
 
 test("跃迁 Cookie 日志脱敏且不会回显 Cookie", () => {

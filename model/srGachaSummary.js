@@ -7,14 +7,37 @@ export const SR_GACHA_POOLS = [
   { type: "GachaType_Newbie", name: "新手跃迁" },
 ]
 export const SR_GACHA_COMMAND = "^(?:\\*|#星铁)更新抽卡记录$"
-export const SR_GACHA_COOKIE_COMMAND = "^(?:\\*|#星铁)绑定跃迁Cookie\\s+(.+)$"
+export const SR_GACHA_COOKIE_COMMAND = "^(?:\\*|#星铁)绑定跃迁Cookie\\s+([\\s\\S]+)$"
 export const SR_GACHA_REIMPORT_PROMPT = "请私聊发送 *绑定跃迁Cookie <完整小程序Cookie> 重新导入"
 
 const API_URL = "https://act-api-takumi.mihoyo.com/event/rpg_gacha_record/five_star_list"
 const VALID_REGIONS = ["prod_gf_cn", "prod_qd_cn"]
 
 function parseCookie(cookie) {
-  return new Map(String(cookie).split(";").map(part => part.trim().split("=")).filter(([key, value]) => key && value).map(([key, ...value]) => [key, value.join("=")]))
+  return new Map(
+    normalizeSrCookie(cookie)
+      .split(";")
+      .map(part => {
+        const index = part.indexOf("=")
+        return index > 0 ? [part.slice(0, index).trim(), part.slice(index + 1).trim()] : []
+      })
+      .filter(([key, value]) => key && value),
+  )
+}
+
+export function normalizeSrCookie(cookie) {
+  let text = String(cookie || "").trim()
+  const codeBlock = text.match(/^```[^\r\n]*\r?\n([\s\S]*?)\r?\n```$/)
+  if (codeBlock) text = codeBlock[1].trim()
+  const shellValue = text.match(/^COOKIE\s*=\s*(['"])([\s\S]*)\1$/i)
+  if (shellValue) text = shellValue[2].trim()
+  text = text.replace(/(?:^|[\r\n])\s*Cookie\s*:\s*/gi, "\n")
+  text = text.replace(/;\s*Cookie\s*:\s*/gi, ";")
+  return text
+    .split(/\r?\n+/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .join(";")
 }
 
 export function getSrRegion(uid) {
@@ -25,7 +48,8 @@ export function getSrRegion(uid) {
 }
 
 export function validateSrCredentials(cookie, device) {
-  const map = parseCookie(cookie)
+  const normalizedCookie = normalizeSrCookie(cookie)
+  const map = parseCookie(normalizedCookie)
   const required = [
     ["account", ["account_id", "account_id_v2", "ltuid", "ltuid_v2"]],
     ["ltoken_v2", ["ltoken_v2"]],
@@ -44,7 +68,7 @@ export function validateSrCredentials(cookie, device) {
   if (device && device !== cookieDevice) {
     throw new Error("崩铁设备信息与 Cookie 中的 _MHYUUID 不一致，请重新绑定包含设备信息的 Cookie")
   }
-  return { cookie: map, device: cookieDevice }
+  return { cookie: map, value: normalizedCookie, device: cookieDevice }
 }
 
 export function isSuccessfulReply(reply) {
@@ -76,8 +100,9 @@ export function readSrGachaCookie(file) {
 export function saveSrGachaCookie(file, cookie) {
   fs.mkdirSync(path.dirname(file), { recursive: true })
   const temp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const normalizedCookie = normalizeSrCookie(cookie)
   try {
-    fs.writeFileSync(temp, cookie, { encoding: "utf8", mode: 0o600, flag: "wx" })
+    fs.writeFileSync(temp, normalizedCookie, { encoding: "utf8", mode: 0o600, flag: "wx" })
     fs.renameSync(temp, file)
     fs.chmodSync(file, 0o600)
   } finally {
@@ -230,8 +255,9 @@ export class SrGachaSummary {
   constructor({ uid, cookie, device = "", region = getSrRegion(uid), request = fetch, file, timeoutMs = 30000 } = {}) {
     if (!uid || !cookie) throw new Error("未找到崩铁 UID 或 Cookie")
     this.uid = String(uid)
-    this.cookie = cookie
-    this.device = validateSrCredentials(cookie, device).device
+    const credentials = validateSrCredentials(cookie, device)
+    this.cookie = credentials.value
+    this.device = credentials.device
     if (!VALID_REGIONS.includes(region) || region !== getSrRegion(this.uid)) throw new Error("仅支持崩铁国服官服或 B 服，区服与 UID 不匹配")
     this.region = region
     this.request = request
