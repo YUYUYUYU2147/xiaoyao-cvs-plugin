@@ -56,7 +56,7 @@ git clone https://github.com/Ctrlcvs/xiaoyao-cvs-plugin.git ./plugins/xiaoyao-cv
 10. 发送 #云原神签到 可签到云原神游戏。
 11. 默认配置文件位于 ./plugins/xiaoyao-cvs-plugin/defSet/config/config.yaml
 12. 支持stoken绑定以及相关的操作。如：【#更新抽卡记录】
-13. 崩铁跃迁摘要更新：先在微信小程序“崩坏：星穹铁道”的跃迁记录统计页抓取 `five_star_list` 请求，复制请求头中 `Cookie:` 后面的完整值（不要复制 `Cookie:` 前缀、引号或响应中的 `Set-Cookie`），再私聊发送 `*绑定跃迁Cookie <完整小程序Cookie>`，最后发送 `*更新抽卡记录`。标准 `#绑定Cookie` 会裁剪小程序字段，不能替代此步骤。该接口目前只返回五星和当前垫抽摘要，不包含四星或完整逐抽记录；`e_hkrpg_token` 有效期约48小时，失效后需重新抓取。
+13. 崩铁跃迁摘要更新：私聊发送 `*绑定跃迁Cookie <米游社Cookie>` 保存主 Cookie（需要包含 `account_id`、`ltoken_v2`、`cookie_token_v2`、`account_mid_v2`、`mi18nLang`），再发送 `*更新抽卡记录`。插件会先通过 `api-takumi.mihoyo.com/common/badge/v1/login/account` 自动换取短期 `e_hkrpg_token`，再请求跃迁摘要接口；不需要手动抓取或保存 `e_hkrpg_token`、`DEVICEFP`、`_MHYUUID`。接口只返回五星和当前垫抽摘要，不包含四星或完整逐抽记录；主 Cookie 失效后需重新绑定。
 
 ##后续计划
 关于插件兼容以及支持问题：

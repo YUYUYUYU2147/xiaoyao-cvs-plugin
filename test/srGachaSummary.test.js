@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { SR_GACHA_COMMAND, SR_GACHA_COOKIE_COMMAND, SR_GACHA_REIMPORT_PROMPT, formatSrGachaFailure, mergeSrSummary, normalizeSrCookie, normalizeSrRecords, SrGachaSummary, getSrRegion, validateSrCredentials, withFileLock, isSuccessfulReply, readSummary, readSrGachaCookie, saveSrGachaCookie, saveSummary, sanitizeSrGachaCookieLog, extractSrGachaCookie } from "../model/srGachaSummary.js"
+import { SR_GACHA_COMMAND, SR_GACHA_COOKIE_COMMAND, SR_GACHA_REIMPORT_PROMPT, SR_GACHA_POOLS, formatSrGachaFailure, mergeSrSummary, normalizeSrCookie, normalizeSrRecords, SrGachaSummary, getSrRegion, validateSrCredentials, withFileLock, isSuccessfulReply, readSummary, readSrGachaCookie, saveSrGachaCookie, saveSummary, sanitizeSrGachaCookieLog, extractSrGachaCookie } from "../model/srGachaSummary.js"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -67,7 +67,7 @@ test("缺少 OK 响应时 update 不写入摘要", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sr-summary-invalid-response-"))
   const file = path.join(dir, "summary.json")
   const request = async () => ({ ok: true, json: async () => ({ retcode: 0, data: { has_more: false, list: [] } }) })
-  await assert.rejects(new SrGachaSummary({ uid: "105411991", cookie, request, file }).update(), /接口返回错误/)
+  await assert.rejects(new SrGachaSummary({ uid: "105411991", cookie, request, file }).update(), /徽章会话换取失败/)
   assert.equal(fs.existsSync(file), false)
   fs.rmSync(dir, { recursive: true, force: true })
 })
@@ -106,6 +106,16 @@ test("命令只匹配星铁更新，不接管获取和导出", () => {
   assert.equal(reg.test("*导出抽卡记录"), false)
 })
 
+test("使用资料确认的五类崩铁跃迁池", () => {
+  assert.deepEqual(SR_GACHA_POOLS.map(pool => pool.type), [
+    "GachaType_AvatarUp",
+    "GachaType_EquipmentUp",
+    "GachaType_CollabAvatarUp",
+    "GachaType_CollabEquipmentUp",
+    "GachaType_Newbie",
+  ])
+})
+
 test("完整跃迁 Cookie 导入命令只接受私聊形态并安全保存", () => {
   const reg = new RegExp(SR_GACHA_COOKIE_COMMAND)
   assert.equal(reg.test("*绑定跃迁Cookie " + cookie), true)
@@ -124,6 +134,35 @@ test("兼容 HttpCanary 多条 Cookie 头和代码块包装", () => {
   const normalized = normalizeSrCookie(input)
   assert.match(normalized, /^account_id=account;ltoken_v2=ltoken;/)
   assert.doesNotThrow(() => validateSrCredentials(input, "device-id"))
+})
+
+test("更新前用主 Cookie 换取徽章会话，并把新票据用于业务请求", async () => {
+  const calls = []
+  const request = async (url, options) => {
+    calls.push({ url, options })
+    if (!url.includes("/common/badge/v1/login/account")) {
+      return { ok: true, json: async () => ({ retcode: 0, message: "OK", data: { has_more: false, list: [] } }) }
+    }
+    return {
+      ok: true,
+      headers: { raw: () => ({ "set-cookie": ["e_hkrpg_token=fresh-token; Path=/; Max-Age=172800"] }) },
+      json: async () => ({ retcode: 0, message: "OK", data: {} }),
+    }
+  }
+  const summary = new SrGachaSummary({ uid: "105411991", cookie, request })
+  await summary.refreshBadgeSession()
+  await summary.fetchPool("GachaType_AvatarUp")
+  assert.match(calls[0].url, /api-takumi\.mihoyo\.com\/common\/badge\/v1\/login\/account$/)
+  assert.equal(calls[0].options.method, "POST")
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    uid: "105411991",
+    region: "prod_gf_cn",
+    game_biz: "hkrpg_cn",
+    lang: "zh-cn",
+  })
+  assert.equal(calls[0].options.headers.Cookie.includes("e_hkrpg_token="), false)
+  assert.equal(calls[1].options.headers.Cookie.endsWith("e_hkrpg_token=fresh-token"), true)
+  assert.equal(summary.cookie.endsWith("e_hkrpg_token=fresh-token"), true)
 })
 
 test("Cookie 提取优先使用适配器原文，避免 e.msg 被标准化后丢失", () => {
@@ -157,9 +196,13 @@ test("B 服参数使用 prod_qd_cn，国际服和未知池类型明确拒绝", a
   await assert.rejects(new SrGachaSummary({ uid: "512345678", cookie, device: "device-id" }).fetchPool("GachaType_WeaponUp"), /尚未完成接口确认/)
 })
 
-test("凭据必须完整且设备值与 _MHYUUID 一致", () => {
+test("主 Cookie 字段足够，设备字段存在时仍校验一致性", () => {
   assert.doesNotThrow(() => validateSrCredentials(cookie, "device-id"))
-  assert.throws(() => validateSrCredentials(cookie.replace("DEVICEFP=fp;", ""), "device-id"), /DEVICEFP/)
+  const mainCookie = cookie.replace("e_hkrpg_token=hkrpg;", "").replace("DEVICEFP=fp;", "").replace("_MHYUUID=device-id;", "")
+  const credentials = validateSrCredentials(mainCookie, "device-id")
+  assert.equal(credentials.mainValue.includes("e_hkrpg_token="), false)
+  assert.equal(credentials.mainValue.includes("DEVICEFP="), false)
+  assert.doesNotThrow(() => validateSrCredentials(mainCookie, "other-device"))
   assert.throws(() => validateSrCredentials(cookie, "other-device"), /不一致/)
 })
 
@@ -210,6 +253,9 @@ test("update 逐池抓取、重新读取并持久化五星增量", async () => {
   const file = path.join(dir, "summary.json")
   let round = 0
   const request = async url => {
+    if (url.includes("/common/badge/v1/login/account")) {
+      return { ok: true, headers: { get: () => "e_hkrpg_token=fresh-token; Path=/" }, json: async () => ({ retcode: 0, message: "OK", data: {} }) }
+    }
     const type = new URL(url).searchParams.get("gacha_type")
     const isAvatar = type === "GachaType_AvatarUp"
     const item = isAvatar ? { item_id: 1, name: round ? "新角色" : "旧角色", item_type: "ItemType_Avatar", rarity: 5 } : { item_id: 2, name: "光锥", item_type: "ItemType_Equipment", rarity: 5 }
@@ -218,7 +264,7 @@ test("update 逐池抓取、重新读取并持久化五星增量", async () => {
   const first = await new SrGachaSummary({ uid: "105411991", cookie, request, file }).update()
   round = 1
   const second = await new SrGachaSummary({ uid: "105411991", cookie, request, file }).update()
-  assert.equal(first.added, 2)
+  assert.equal(first.added, 5)
   assert.equal(second.added, 0)
   assert.equal(readSummary(file).pools.GachaType_AvatarUp.records[0].name, "新角色")
   assert.equal(readSummary(file).pools.GachaType_Newbie.records.length, 1)

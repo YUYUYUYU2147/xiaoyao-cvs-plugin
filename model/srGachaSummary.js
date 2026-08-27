@@ -4,14 +4,19 @@ import fetch from "node-fetch"
 
 export const SR_GACHA_POOLS = [
   { type: "GachaType_AvatarUp", name: "角色活动跃迁" },
+  { type: "GachaType_EquipmentUp", name: "光锥活动跃迁" },
+  { type: "GachaType_CollabAvatarUp", name: "联动角色跃迁" },
+  { type: "GachaType_CollabEquipmentUp", name: "联动光锥跃迁" },
   { type: "GachaType_Newbie", name: "新手跃迁" },
 ]
 export const SR_GACHA_COMMAND = "^(?:\\*|#星铁)更新抽卡记录$"
 export const SR_GACHA_COOKIE_COMMAND = "^(?:\\*|#星铁)绑定跃迁Cookie\\s+([\\s\\S]+)$"
-export const SR_GACHA_REIMPORT_PROMPT = "请私聊发送 *绑定跃迁Cookie <完整小程序Cookie> 重新导入"
+export const SR_GACHA_REIMPORT_PROMPT = "请私聊发送 *绑定跃迁Cookie <米游社Cookie> 重新导入"
 
 const API_URL = "https://act-api-takumi.mihoyo.com/event/rpg_gacha_record/five_star_list"
+const BADGE_API_URL = "https://api-takumi.mihoyo.com/common/badge/v1/login/account"
 const VALID_REGIONS = ["prod_gf_cn", "prod_qd_cn"]
+const EPHEMERAL_COOKIE_KEYS = ["e_hkrpg_token", "DEVICEFP", "DEVICEFP_SEED_ID", "DEVICEFP_SEED_TIME", "_MHYUUID"]
 
 function parseCookie(cookie) {
   return new Map(
@@ -23,6 +28,27 @@ function parseCookie(cookie) {
       })
       .filter(([key, value]) => key && value),
   )
+}
+
+function serializeCookie(cookie) {
+  return [...cookie.entries()].map(([key, value]) => `${key}=${value}`).join(";")
+}
+
+function getSetCookieHeaders(headers) {
+  if (typeof headers?.raw === "function") {
+    const values = headers.raw()["set-cookie"]
+    if (Array.isArray(values)) return values
+  }
+  const value = headers?.get?.("set-cookie")
+  return value ? [value] : []
+}
+
+function getSetCookieValue(headers, name) {
+  for (const header of getSetCookieHeaders(headers)) {
+    const match = String(header).match(new RegExp(`(?:^|,\\s*)${name}=([^;,]*)`))
+    if (match?.[1]) return match[1]
+  }
+  return ""
 }
 
 export function normalizeSrCookie(cookie) {
@@ -59,20 +85,19 @@ export function validateSrCredentials(cookie, device) {
     ["ltoken_v2", ["ltoken_v2"]],
     ["cookie_token_v2", ["cookie_token_v2"]],
     ["mid", ["account_mid_v2", "ltmid_v2"]],
-    ["e_hkrpg_token", ["e_hkrpg_token"]],
-    ["DEVICEFP", ["DEVICEFP"]],
-    ["_MHYUUID", ["_MHYUUID"]],
     ["mi18nLang", ["mi18nLang"]],
   ]
   const missing = required.filter(([, keys]) => !keys.some(key => map.get(key))).map(([name]) => name)
   if (missing.length) {
-    throw new Error(`崩铁 Cookie 缺少必要字段：${missing.join("、")}；请提供包含短期 e_hkrpg_token 和 DEVICEFP 的小程序 Cookie`)
+    throw new Error(`崩铁 Cookie 缺少必要字段：${missing.join("、")}；请提供米游社主 Cookie`)
   }
   const cookieDevice = map.get("_MHYUUID")
-  if (device && device !== cookieDevice) {
+  if (device && cookieDevice && device !== cookieDevice) {
     throw new Error("崩铁设备信息与 Cookie 中的 _MHYUUID 不一致，请重新绑定包含设备信息的 Cookie")
   }
-  return { cookie: map, value: normalizedCookie, device: cookieDevice }
+  const mainCookie = new Map(map)
+  for (const key of EPHEMERAL_COOKIE_KEYS) mainCookie.delete(key)
+  return { cookie: map, value: normalizedCookie, mainValue: serializeCookie(mainCookie), device: cookieDevice || "" }
 }
 
 export function isSuccessfulReply(reply) {
@@ -261,6 +286,7 @@ export class SrGachaSummary {
     this.uid = String(uid)
     const credentials = validateSrCredentials(cookie, device)
     this.cookie = credentials.value
+    this.mainCookie = credentials.mainValue
     this.device = credentials.device
     if (!VALID_REGIONS.includes(region) || region !== getSrRegion(this.uid)) throw new Error("仅支持崩铁国服官服或 B 服，区服与 UID 不匹配")
     this.region = region
@@ -268,6 +294,46 @@ export class SrGachaSummary {
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("请求超时必须是有限正数")
     this.timeoutMs = timeoutMs
     this.file = file || path.join(process.cwd(), "data", "srGachaSummary", `${this.uid}.json`)
+  }
+
+  async refreshBadgeSession() {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
+    try {
+      const response = await this.request(BADGE_API_URL, {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/plain, */*",
+          "content-type": "application/json",
+          origin: "https://act.mihoyo.com",
+          referer: "https://act.mihoyo.com/",
+          Cookie: this.mainCookie,
+        },
+        body: JSON.stringify({
+          uid: this.uid,
+          region: this.region,
+          game_biz: "hkrpg_cn",
+          lang: "zh-cn",
+        }),
+        signal: controller.signal,
+      })
+      if (!response?.ok) throw new Error(`HTTP ${response?.status || "请求失败"}`)
+      const reply = await response.json()
+      if (reply?.retcode !== 0 || reply?.message !== "OK") {
+        throw new Error(`崩铁徽章会话换取失败（retcode ${reply?.retcode ?? "未知"}，message ${reply?.message ?? "未知"}）`)
+      }
+      const token = getSetCookieValue(response.headers, "e_hkrpg_token")
+      if (!token) throw new Error("崩铁徽章会话未下发 e_hkrpg_token")
+      this.cookie = `${this.mainCookie};e_hkrpg_token=${token}`
+      return token
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error(`崩铁徽章会话换取超时（${this.timeoutMs}ms）`)
+      const message = error?.message || String(error)
+      if (message.startsWith("崩铁徽章会话")) throw new Error(message)
+      throw new Error(`请求崩铁徽章会话失败：${message}`)
+    } finally {
+      clearTimeout(timeout)
+    }
   }
 
   async fetchPool(gachaType) {
@@ -297,8 +363,6 @@ export class SrGachaSummary {
             referer: "https://act.mihoyo.com/",
             "x-rpc-platform": "android",
             "x-rpc-jump_source": "2",
-            "x-requested-with": "com.tencent.mm",
-            ...(this.device ? { "x-rpc-device_id": this.device } : {}),
             Cookie: this.cookie,
           },
           signal: controller.signal,
@@ -329,6 +393,7 @@ export class SrGachaSummary {
 
   async update() {
     return await withFileLock(this.file, async () => {
+      await this.refreshBadgeSession()
       const incoming = {}
       for (const pool of SR_GACHA_POOLS) incoming[pool.type] = await this.fetchPool(pool.type)
       // 必须在完整抓取后重新读取，避免并发更新覆盖另一进程的新记录。

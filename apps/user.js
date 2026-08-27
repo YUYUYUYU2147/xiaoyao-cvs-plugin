@@ -226,7 +226,7 @@ export async function srGclog(e) {
     }
   })
   if (!uid || !cookie) {
-    e.reply(`未找到可用的崩铁完整 Cookie。当前标准绑定不会保留 e_hkrpg_token、DEVICEFP、_MHYUUID 等小程序字段，${SR_GACHA_REIMPORT_PROMPT}`)
+    e.reply(`未找到可用的崩铁米游社 Cookie。需要主 Cookie 中包含账号、登录票据和 mid 字段，${SR_GACHA_REIMPORT_PROMPT}`)
     return true
   }
   e.reply("崩铁五星跃迁摘要获取中，请稍等...")
@@ -249,7 +249,7 @@ export async function srGclog(e) {
 
 export async function srGachaCookie(e) {
   if (!e.isPrivate) {
-    e.reply("为保护 Cookie 安全，请私聊发送【*绑定跃迁Cookie 完整小程序Cookie】")
+    e.reply("为保护 Cookie 安全，请私聊发送【*绑定跃迁Cookie 米游社Cookie】")
     return true
   }
   if (!e.user?.getUid) {
