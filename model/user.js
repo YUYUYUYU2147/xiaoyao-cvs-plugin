@@ -757,9 +757,13 @@ export default class user {
       skuid = await gsCfg.getBingCookie(e.user_id)
       cookie = skuid?.ck
       uid = skuid?.item
-      if (!uid && e?.user?.getUid) {
-        uid = e?.user?.getUid("gs")
-        cookie = e?.user?.mysUser?.ck
+      if (e?.isSr && e?.user?.getUid) {
+        const game = "sr"
+        uid = e.user.getUid(game)
+        cookie = e.user.getMysUser(game)?.ck || cookie
+      } else if (!uid && e?.user?.getUid) {
+        uid = e.user.getUid("gs")
+        cookie = e.user.getMysUser("gs")?.ck
       }
       // if (!uid && e.user) { //获取uid为空时进行后续处理获取 (临时处理方式后续会进行解耦以避免这种情况。。待咕中.)s
       // }

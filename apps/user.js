@@ -7,6 +7,7 @@ import gsCfg from "../model/gsCfg.js"
 import fs from "fs"
 import YAML from "yaml"
 import User from "../model/user.js"
+import { SR_GACHA_COMMAND, SR_GACHA_COOKIE_COMMAND, SR_GACHA_REIMPORT_PROMPT, SrGachaSummary, formatSrSummary, formatSrGachaFailure, getSrGachaCookieFile, isSuccessfulReply, readSrGachaCookie, saveSrGachaCookie } from "../model/srGachaSummary.js"
 
 export const rule = {
   userInfo: {
@@ -16,6 +17,14 @@ export const rule = {
   gclog: {
     reg: "^#*(更新|获取|导出)抽卡记录$",
     describe: "更新抽卡记录",
+  },
+  srGclog: {
+    reg: SR_GACHA_COMMAND,
+    describe: "更新崩铁五星跃迁摘要",
+  },
+  srGachaCookie: {
+    reg: SR_GACHA_COOKIE_COMMAND,
+    describe: "绑定崩铁跃迁 Cookie",
   },
   gcPaylog: {
     //避免指令冲突
@@ -136,6 +145,7 @@ export async function gcPaylog(e) {
 }
 export async function gclog(e) {
   let user = new User(e)
+  if (e.isSr) return await srGclog(e)
   await user.cookie(e)
   let redis_Data = await redis.get(`xiaoyao:gclog:${e.user_id}`)
   if (redis_Data) {
@@ -179,6 +189,86 @@ export async function gclog(e) {
     //数据写入缓存避免重复请求
     EX: time,
   })
+  return true
+}
+
+export async function srGclog(e) {
+  const redisKey = `xiaoyao:srGclog:${e.user_id}`
+  const redisData = await redis.get(redisKey)
+  if (redisData) {
+    const time = redisData * 1 - Math.floor(Date.now() / 1000)
+    e.reply(`请求过快,请${time}秒后重试...`)
+    return true
+  }
+  if (!e.user?.getUid || !e.user?.getMysUser) {
+    e.reply("当前运行环境不支持读取崩铁账号，请更新云崽核心")
+    return true
+  }
+  const uid = e.user.getUid("sr")
+  const mysUser = e.user.getMysUser("sr")
+  if (!uid) {
+    e.reply("未找到已绑定的崩铁 UID，请先绑定崩铁账号")
+    return true
+  }
+  const candidateCookies = [readSrGachaCookie(getSrGachaCookieFile(e.user_id)), e.cookie]
+  const user = new User(e)
+  try {
+    const cookieData = await user.getCookie(e)
+    candidateCookies.push(cookieData?.cookie, e.cookie)
+  } catch {}
+  candidateCookies.push(mysUser?.ck)
+  const cookie = candidateCookies.find(value => {
+    try {
+      new SrGachaSummary({ uid, cookie: value })
+      return true
+    } catch {
+      return false
+    }
+  })
+  if (!uid || !cookie) {
+    e.reply(`未找到可用的崩铁完整 Cookie。当前标准绑定不会保留 e_hkrpg_token、DEVICEFP、_MHYUUID 等小程序字段，${SR_GACHA_REIMPORT_PROMPT}`)
+    return true
+  }
+  e.reply("崩铁五星跃迁摘要获取中，请稍等...")
+  try {
+    const result = await new SrGachaSummary({ uid, cookie }).update()
+    const count = Object.values(result.pools).reduce((sum, pool) => sum + pool.records.length, 0)
+    const pity = Object.values(result.pools).filter(pool => pool.pity).map(pool => `${pool.name}${pool.pity.gacha_count}抽`).join("、")
+    const detail = formatSrSummary(result)
+    const successMessage = `崩铁跃迁摘要更新完成，新增五星 ${result.added} 条，当前共 ${count} 条。${pity ? `当前垫抽：${pity}。` : ""}\n${detail}\n仅包含五星记录和当前垫抽摘要，不是完整逐抽历史，不含四星记录。`
+    const replyResult = await e.reply(successMessage)
+    if (!isSuccessfulReply(replyResult)) return true
+    const time = (configData.gclogEx || 5) * 60
+    await redis.set(redisKey, Math.floor(Date.now() / 1000) + time, { EX: time })
+  } catch (error) {
+    logger.error(`[崩铁跃迁摘要] ${error.message}`)
+    e.reply(formatSrGachaFailure(error))
+  }
+  return true
+}
+
+export async function srGachaCookie(e) {
+  if (!e.isPrivate) {
+    e.reply("为保护 Cookie 安全，请私聊发送【*绑定跃迁Cookie 完整小程序Cookie】")
+    return true
+  }
+  if (!e.user?.getUid) {
+    e.reply("当前运行环境不支持读取崩铁 UID，请更新云崽核心")
+    return true
+  }
+  const uid = e.user.getUid("sr")
+  if (!uid) {
+    e.reply("请先绑定崩铁 UID，再导入跃迁 Cookie")
+    return true
+  }
+  const cookie = e.msg.replace(new RegExp(`^${SR_GACHA_COOKIE_COMMAND}`), "$1").trim()
+  try {
+    new SrGachaSummary({ uid, cookie })
+    saveSrGachaCookie(getSrGachaCookieFile(e.user_id), cookie)
+    e.reply("崩铁跃迁 Cookie 已安全保存，可发送【*更新抽卡记录】获取五星跃迁摘要")
+  } catch (error) {
+    e.reply(`Cookie 导入失败：${error.message}`)
+  }
   return true
 }
 async function getAuthKey(
