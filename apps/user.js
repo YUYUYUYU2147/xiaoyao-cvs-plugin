@@ -7,7 +7,7 @@ import gsCfg from "../model/gsCfg.js"
 import fs from "fs"
 import YAML from "yaml"
 import User from "../model/user.js"
-import { SR_GACHA_COMMAND, SR_GACHA_COOKIE_COMMAND, SR_GACHA_REIMPORT_PROMPT, SrGachaSummary, formatSrSummary, formatSrGachaFailure, getSrGachaCookieFile, isSuccessfulReply, readSrGachaCookie, saveSrGachaCookie } from "../model/srGachaSummary.js"
+import { SR_GACHA_COMMAND, SR_GACHA_COOKIE_COMMAND, SR_GACHA_REIMPORT_PROMPT, SrGachaSummary, formatSrSummary, formatSrGachaFailure, getSrGachaCookieFile, isSuccessfulReply, readSrGachaCookie, saveSrGachaCookie, extractSrGachaCookie } from "../model/srGachaSummary.js"
 
 export const rule = {
   userInfo: {
@@ -261,7 +261,7 @@ export async function srGachaCookie(e) {
     e.reply("请先绑定崩铁 UID，再导入跃迁 Cookie")
     return true
   }
-  const cookie = e.msg.replace(new RegExp(`^${SR_GACHA_COOKIE_COMMAND}`), "$1").trim()
+  const cookie = extractSrGachaCookie(e.raw_message || e.original_msg || e.msg)
   try {
     new SrGachaSummary({ uid, cookie })
     saveSrGachaCookie(getSrGachaCookieFile(e.user_id), cookie)

@@ -40,6 +40,10 @@ export function normalizeSrCookie(cookie) {
     .join(";")
 }
 
+export function extractSrGachaCookie(message) {
+  return String(message || "").match(new RegExp(SR_GACHA_COOKIE_COMMAND))?.[1]?.trim() || ""
+}
+
 export function getSrRegion(uid) {
   const prefix = String(uid).slice(0, -8)
   if (prefix === "5") return "prod_qd_cn"

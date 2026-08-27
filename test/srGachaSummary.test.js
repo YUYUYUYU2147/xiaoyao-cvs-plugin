@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { SR_GACHA_COMMAND, SR_GACHA_COOKIE_COMMAND, SR_GACHA_REIMPORT_PROMPT, formatSrGachaFailure, mergeSrSummary, normalizeSrCookie, normalizeSrRecords, SrGachaSummary, getSrRegion, validateSrCredentials, withFileLock, isSuccessfulReply, readSummary, readSrGachaCookie, saveSrGachaCookie, saveSummary, sanitizeSrGachaCookieLog } from "../model/srGachaSummary.js"
+import { SR_GACHA_COMMAND, SR_GACHA_COOKIE_COMMAND, SR_GACHA_REIMPORT_PROMPT, formatSrGachaFailure, mergeSrSummary, normalizeSrCookie, normalizeSrRecords, SrGachaSummary, getSrRegion, validateSrCredentials, withFileLock, isSuccessfulReply, readSummary, readSrGachaCookie, saveSrGachaCookie, saveSummary, sanitizeSrGachaCookieLog, extractSrGachaCookie } from "../model/srGachaSummary.js"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -124,6 +124,13 @@ test("兼容 HttpCanary 多条 Cookie 头和代码块包装", () => {
   const normalized = normalizeSrCookie(input)
   assert.match(normalized, /^account_id=account;ltoken_v2=ltoken;/)
   assert.doesNotThrow(() => validateSrCredentials(input, "device-id"))
+})
+
+test("Cookie 提取优先使用适配器原文，避免 e.msg 被标准化后丢失", () => {
+  const rawMessage = `*绑定跃迁Cookie\nCookie: ${cookie}`
+  const extracted = extractSrGachaCookie(rawMessage)
+  assert.equal(extracted, `Cookie: ${cookie}`)
+  assert.doesNotThrow(() => validateSrCredentials(extracted))
 })
 
 test("跃迁 Cookie 日志脱敏且不会回显 Cookie", () => {
