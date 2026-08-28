@@ -8,6 +8,7 @@ import fs from "fs"
 import YAML from "yaml"
 import User from "../model/user.js"
 import { SR_GACHA_COMMAND, SR_GACHA_COOKIE_COMMAND, SR_GACHA_REIMPORT_PROMPT, SrGachaSummary, formatSrSummary, formatSrGachaFailure, getSrGachaCookieFile, isSuccessfulReply, readSrGachaCookie, saveSrGachaCookie, extractSrGachaCookie } from "../model/srGachaSummary.js"
+import { hasPlaceholder, syncSummaryToGenshin } from "../model/srGachaBridge.js"
 
 export const rule = {
   userInfo: {
@@ -25,6 +26,11 @@ export const rule = {
   srGachaCookie: {
     reg: SR_GACHA_COOKIE_COMMAND,
     describe: "绑定崩铁跃迁 Cookie",
+  },
+  srGachaExportGuard: {
+    // 存在占位条目时禁止导出，避免把不完整数据写进 UIGF 文件
+    reg: "^#?(原神|星铁)?(强制)?导出记录(json)?(v2|v4)?$",
+    describe: "崩铁占位记录导出保护",
   },
   gcPaylog: {
     //避免指令冲突
@@ -235,7 +241,32 @@ export async function srGclog(e) {
     const count = Object.values(result.pools).reduce((sum, pool) => sum + pool.records.length, 0)
     const pity = Object.values(result.pools).filter(pool => pool.pity).map(pool => `${pool.name}${pool.pity.gacha_count}抽`).join("、")
     const detail = formatSrSummary(result)
-    const successMessage = `崩铁跃迁摘要更新完成，新增五星 ${result.added} 条，当前共 ${count} 条。${pity ? `当前垫抽：${pity}。` : ""}\n${detail}\n仅包含五星记录和当前垫抽摘要，不是完整逐抽历史，不含四星记录。`
+    let bridgeNote = ""
+    try {
+      const stats = syncSummaryToGenshin({ userId: e.user_id, uid, pools: result.pools })
+      const notes = []
+      if (stats.pools) {
+        notes.push(`已向抽卡记录写入 ${stats.five} 条五星、${stats.placeholder} 条占位（占位仅补总抽数，不计入四星统计）`)
+      } else if (!stats.errors.length) {
+        notes.push("抽卡记录已由游戏内链接导入的完整数据覆盖，本次无需写入")
+      }
+      if (stats.skipped) notes.push(`${stats.skipped} 条五星已有完整逐抽记录，跳过`)
+      for (const item of stats.boundary) {
+        const names = item.items.map(row => `${row.name}(${row.skippedDraw}抽)`).join("、")
+        notes.push(`${names} 的垫抽跨入已导入区间，未补占位以避免重复计数`)
+      }
+      for (const item of stats.shortfall) {
+        const names = item.items.map(row => `${row.name} 缺 ${row.need - row.got}`).join("、")
+        notes.push(`池 ${item.type} 占位空间不足：${names}`)
+      }
+      for (const item of stats.errors) notes.push(`池 ${item.type} 同步失败：${item.message}`)
+      if (notes.length) bridgeNote = `\n${notes.join("；")}。`
+      if (stats.pools) bridgeNote += `可用 ${e.isSr ? "*" : "#"}抽卡记录 查看。`
+    } catch (error) {
+      logger.error(`[崩铁跃迁摘要] 同步抽卡记录失败：${error.message}`)
+      bridgeNote = `\n同步到抽卡记录失败：${error.message}`
+    }
+    const successMessage = `崩铁跃迁摘要更新完成，新增五星 ${result.added} 条，当前共 ${count} 条。${pity ? `当前垫抽：${pity}。` : ""}\n${detail}\n仅包含五星记录和当前垫抽摘要，不是完整逐抽历史，不含四星记录。${bridgeNote}`
     const replyResult = await e.reply(successMessage)
     if (!isSuccessfulReply(replyResult)) return true
     const time = (configData.gclogEx || 5) * 60
@@ -486,4 +517,18 @@ function getServer(uid) {
       return "os_cht" // 港澳台服
   }
   return "cn_gf01"
+}
+
+export async function srGachaExportGuard(e) {
+  if (!e.isSr) return false
+  const uid = e.user?.getUid ? e.user.getUid("sr") : e.uid
+  if (!uid || !hasPlaceholder(e.user_id, uid)) return false
+  e.reply(
+    [
+      "检测到抽卡记录中存在占位条目，已阻止导出。",
+      "占位条目由崩铁五星跃迁摘要生成，用于补齐总抽数，不含四星与三星明细，导出会产生不完整的 UIGF 文件。",
+      "请先在游戏内获取抽卡链接，执行一次全量更新抽卡记录，占位条目会被真实数据整段替换，之后即可正常导出。",
+    ].join("\n"),
+  )
+  return true
 }
