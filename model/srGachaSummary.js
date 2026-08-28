@@ -111,7 +111,7 @@ export function sanitizeSrGachaCookieLog(text) {
 }
 
 export function formatSrGachaFailure(error) {
-  return `崩铁跃迁摘要获取失败：${error?.message || "未知错误"}\n${SR_GACHA_REIMPORT_PROMPT}`
+  return `崩铁五星抽卡记录获取失败：${error?.message || "未知错误"}\n${SR_GACHA_REIMPORT_PROMPT}`
 }
 
 export function getSrGachaCookieFile(userId) {

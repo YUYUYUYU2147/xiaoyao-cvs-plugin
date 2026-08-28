@@ -22,7 +22,7 @@ export const rule = {
   },
   srGclog: {
     reg: SR_GACHA_COMMAND,
-    describe: "更新崩铁五星跃迁摘要",
+    describe: "更新崩铁五星抽卡记录",
   },
   srGachaCookie: {
     reg: SR_GACHA_COOKIE_COMMAND,
@@ -153,7 +153,7 @@ export async function gcPaylog(e) {
 export async function gclog(e) {
   let user = new User(e)
   if (e.isSr) {
-    // 崩铁没有可用的 authkey 链路，更新走徽章摘要；导出复用 genshin 的 UIGF 导出
+    // 崩铁没有可用的 authkey 链路，更新走徽章接口；导出复用 genshin 的 UIGF 导出
     if (!/导出|获取/.test(e.msg)) return await srGclog(e)
     if (await srGachaExportGuard(e)) return true
     if (e.isGroup && !e.msg.includes("强制")) {
@@ -252,7 +252,7 @@ export async function srGclog(e) {
     e.reply(`未找到可用的崩铁米游社 Cookie。需要包含账号、ltoken 和 cookie_token，${SR_GACHA_REIMPORT_PROMPT}`)
     return true
   }
-  e.reply("崩铁五星跃迁摘要获取中，请稍等...")
+  e.reply("崩铁五星抽卡记录更新中，请稍等...")
   try {
     const result = await new SrGachaSummary({ uid, cookie }).update()
     const count = Object.values(result.pools).reduce((sum, pool) => sum + pool.records.length, 0)
@@ -280,16 +280,16 @@ export async function srGclog(e) {
       if (notes.length) bridgeNote = `\n${notes.join("；")}。`
       if (stats.pools) bridgeNote += `可用 ${e.isSr ? "*" : "#"}抽卡记录 查看。`
     } catch (error) {
-      logger.error(`[崩铁跃迁摘要] 同步抽卡记录失败：${error.message}`)
+    logger.error(`[崩铁五星抽卡记录] 同步抽卡记录失败：${error.message}`)
       bridgeNote = `\n同步到抽卡记录失败：${error.message}`
     }
-    const successMessage = `崩铁跃迁摘要更新完成，新增五星 ${result.added} 条，当前共 ${count} 条。${pity ? `当前垫抽：${pity}。` : ""}\n${detail}\n仅包含五星记录和当前垫抽摘要，不是完整逐抽历史，不含四星记录。${bridgeNote}`
+    const successMessage = `崩铁五星抽卡记录更新完成，新增五星 ${result.added} 条，当前共 ${count} 条。${pity ? `当前垫抽：${pity}。` : ""}\n${detail}\n仅包含五星记录和当前垫抽状态，不是完整逐抽历史，不含四星记录。${bridgeNote}`
     const replyResult = await e.reply(successMessage)
     if (!isSuccessfulReply(replyResult)) return true
     const time = (configData.gclogEx || 5) * 60
     await redis.set(redisKey, Math.floor(Date.now() / 1000) + time, { EX: time })
   } catch (error) {
-    logger.error(`[崩铁跃迁摘要] ${error.message}`)
+    logger.error(`[崩铁五星抽卡记录] ${error.message}`)
     e.reply(formatSrGachaFailure(error))
   }
   return true
@@ -313,7 +313,7 @@ export async function srGachaCookie(e) {
   try {
     new SrGachaSummary({ uid, cookie })
     saveSrGachaCookie(getSrGachaCookieFile(e.user_id), cookie)
-    e.reply("崩铁跃迁 Cookie 已安全保存，可发送【*更新抽卡记录】获取五星跃迁摘要")
+    e.reply("崩铁跃迁 Cookie 已安全保存，可发送【*更新抽卡记录】获取五星抽卡记录")
   } catch (error) {
     e.reply(`Cookie 导入失败：${error.message}`)
   }
@@ -543,7 +543,7 @@ export async function srGachaExportGuard(e) {
   e.reply(
     [
       "检测到抽卡记录中存在占位条目，已阻止导出。",
-      "占位条目由崩铁五星跃迁摘要生成，用于补齐总抽数，不含四星与三星明细，导出会产生不完整的 UIGF 文件。",
+      "占位条目由崩铁五星抽卡记录生成，用于补齐总抽数，不含四星与三星明细，导出会产生不完整的 UIGF 文件。",
       "请先在游戏内获取抽卡链接，执行一次全量更新抽卡记录，占位条目会被真实数据整段替换，之后即可正常导出。",
     ].join("\n"),
   )

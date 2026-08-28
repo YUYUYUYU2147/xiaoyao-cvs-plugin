@@ -237,6 +237,8 @@ test("回复返回 error 时不视为成功", () => {
 test("业务失败提示包含准确的私聊重新导入入口", () => {
   const message = formatSrGachaFailure(new Error("HTTP 401"))
   assert.match(message, /HTTP 401/)
+  assert.match(message, /崩铁五星抽卡记录获取失败/)
+  assert.equal(message.includes("跃迁摘要"), false)
   assert.ok(message.includes(SR_GACHA_REIMPORT_PROMPT))
 })
 
