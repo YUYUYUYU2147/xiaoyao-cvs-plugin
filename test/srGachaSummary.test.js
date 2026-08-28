@@ -165,6 +165,22 @@ test("更新前用主 Cookie 换取徽章会话，并把新票据用于业务请
   assert.equal(summary.cookie.endsWith("e_hkrpg_token=fresh-token"), true)
 })
 
+test("兼容 Node Headers.getSetCookie 读取徽章会话票据", async () => {
+  const request = async url => {
+    if (url.includes("/common/badge/v1/login/account")) {
+      return {
+        ok: true,
+        headers: { getSetCookie: () => ["e_hkrpg_token=node-token; Path=/"] },
+        json: async () => ({ retcode: 0, message: "OK", data: {} }),
+      }
+    }
+    return { ok: true, json: async () => ({ retcode: 0, message: "OK", data: { has_more: false, list: [] } }) }
+  }
+  const summary = new SrGachaSummary({ uid: "105411991", cookie, request })
+  await summary.refreshBadgeSession()
+  assert.equal(summary.cookie.endsWith("e_hkrpg_token=node-token"), true)
+})
+
 test("Cookie 提取优先使用适配器原文，避免 e.msg 被标准化后丢失", () => {
   const rawMessage = `*绑定跃迁Cookie\nCookie: ${cookie}`
   const extracted = extractSrGachaCookie(rawMessage)

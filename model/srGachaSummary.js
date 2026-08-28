@@ -35,6 +35,10 @@ function serializeCookie(cookie) {
 }
 
 function getSetCookieHeaders(headers) {
+  if (typeof headers?.getSetCookie === "function") {
+    const values = headers.getSetCookie()
+    if (Array.isArray(values)) return values
+  }
   if (typeof headers?.raw === "function") {
     const values = headers.raw()["set-cookie"]
     if (Array.isArray(values)) return values
