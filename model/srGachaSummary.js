@@ -280,6 +280,29 @@ export function formatSrSummary(result, maxPerPool = 5) {
   return lines.join("\n")
 }
 
+function describeFetchError(error) {
+  const code = error?.cause?.code || error?.code || ""
+  const message = error?.message || String(error)
+  return code ? `${code}（${message}）` : message
+}
+
+/** 米哈游接口走昆仑 CDN，部分节点从境外主机不可达，失败后重试可命中其它节点 */
+async function requestWithRetry(request, url, options, { retries = 3, delay = 800, label = "请求" } = {}) {
+  let last
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await request(url, options)
+      if (!response?.ok) throw new Error(`HTTP ${response?.status || "请求失败"}`)
+      return response
+    } catch (error) {
+      last = error
+      if (options?.signal?.aborted) break
+      if (attempt < retries) await new Promise(resolve => setTimeout(resolve, delay * attempt))
+    }
+  }
+  throw new Error(`${label}失败：${describeFetchError(last)}（已重试 ${retries} 次，接口节点可能不可达）`)
+}
+
 export class SrGachaSummary {
   constructor({ uid, cookie, device = "", region = getSrRegion(uid), request = fetch, file, timeoutMs = 30000 } = {}) {
     if (!uid || !cookie) throw new Error("未找到崩铁 UID 或 Cookie")
@@ -300,24 +323,28 @@ export class SrGachaSummary {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
     try {
-      const response = await this.request(BADGE_API_URL, {
-        method: "POST",
-        headers: {
-          accept: "application/json, text/plain, */*",
-          "content-type": "application/json",
-          origin: "https://act.mihoyo.com",
-          referer: "https://act.mihoyo.com/",
-          Cookie: this.mainCookie,
+      const response = await requestWithRetry(
+        this.request,
+        BADGE_API_URL,
+        {
+          method: "POST",
+          headers: {
+            accept: "application/json, text/plain, */*",
+            "content-type": "application/json",
+            origin: "https://act.mihoyo.com",
+            referer: "https://act.mihoyo.com/",
+            Cookie: this.mainCookie,
+          },
+          body: JSON.stringify({
+            uid: this.uid,
+            region: this.region,
+            game_biz: "hkrpg_cn",
+            lang: "zh-cn",
+          }),
+          signal: controller.signal,
         },
-        body: JSON.stringify({
-          uid: this.uid,
-          region: this.region,
-          game_biz: "hkrpg_cn",
-          lang: "zh-cn",
-        }),
-        signal: controller.signal,
-      })
-      if (!response?.ok) throw new Error(`HTTP ${response?.status || "请求失败"}`)
+        { label: "崩铁徽章会话换取" },
+      )
       const reply = await response.json()
       if (reply?.retcode !== 0 || reply?.message !== "OK") {
         throw new Error(`崩铁徽章会话换取失败（retcode ${reply?.retcode ?? "未知"}，message ${reply?.message ?? "未知"}）`)
@@ -356,22 +383,26 @@ export class SrGachaSummary {
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
       try {
-        response = await this.request(`${API_URL}?${params}`, {
-          headers: {
-            accept: "application/json, text/plain, */*",
-            origin: "https://act.mihoyo.com",
-            referer: "https://act.mihoyo.com/",
-            "x-rpc-platform": "android",
-            "x-rpc-jump_source": "2",
-            Cookie: this.cookie,
+        response = await requestWithRetry(
+          this.request,
+          `${API_URL}?${params}`,
+          {
+            headers: {
+              accept: "application/json, text/plain, */*",
+              origin: "https://act.mihoyo.com",
+              referer: "https://act.mihoyo.com/",
+              "x-rpc-platform": "android",
+              "x-rpc-jump_source": "2",
+              Cookie: this.cookie,
+            },
+            signal: controller.signal,
           },
-          signal: controller.signal,
-        })
-        if (!response?.ok) throw new Error(`HTTP ${response?.status || "请求失败"}`)
+          { label: `请求${gachaType}` },
+        )
         response = await response.json()
       } catch (error) {
         if (controller.signal.aborted) throw new Error(`请求${gachaType}超时（${this.timeoutMs}ms）`)
-        throw new Error(`请求${gachaType}失败：${error.message}`)
+        throw new Error(error.message.startsWith("请求") ? error.message : `请求${gachaType}失败：${describeFetchError(error)}`)
       } finally {
         clearTimeout(timeout)
       }
