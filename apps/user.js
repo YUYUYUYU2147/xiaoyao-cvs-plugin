@@ -260,7 +260,7 @@ export async function srGclog(e) {
     const detail = formatSrSummary(result)
     let bridgeNote = ""
     try {
-      const stats = syncSummaryToGenshin({ userId: e.user_id, uid, pools: result.pools })
+      const stats = await syncSummaryToGenshin({ userId: e.user_id, uid, pools: result.pools })
       const notes = []
       if (stats.pools) {
         notes.push(`已向抽卡记录写入 ${stats.five} 条五星、${stats.placeholder} 条占位（占位仅补总抽数，不计入四星统计）`)

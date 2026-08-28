@@ -32,13 +32,40 @@ export function batchOf(id) {
   return String(id).slice(0, BATCH_LEN)
 }
 
+function formatTime(ms) {
+  const date = new Date(ms + 8 * 60 * 60 * 1000)
+  const pad = value => String(value).padStart(2, "0")
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`
+}
+
 /** 记录 id 前 13 位是毫秒时间戳，据此还原 time，不伪造时间 */
 export function idToTime(id) {
   const ms = Number(String(id).slice(0, 13))
   if (!Number.isFinite(ms) || ms <= 0) return ""
-  const date = new Date(ms + 8 * 60 * 60 * 1000)
-  const pad = value => String(value).padStart(2, "0")
-  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`
+  return formatTime(ms)
+}
+
+/**
+ * 卡池时间轴：把一个批次内的条目按序摊到该卡池的真实开放区间里。
+ * Miao-Plugin 的 analyse() 按 item.time 归入版本卡池，若 time 落在区间外
+ * 会被归进「未知 / Invalid date」，因此不能沿用 id 推算出的批次时间戳。
+ */
+export function makeTimeline(poolWindow, count) {
+  if (!poolWindow || count <= 0) return []
+  const from = Date.parse(String(poolWindow.from).replace(/-/g, "/"))
+  const to = Date.parse(String(poolWindow.to).replace(/-/g, "/"))
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return []
+  // 留出两端各 1 分钟余量，避免边界与相邻卡池重叠
+  const head = from + 60000
+  const tail = to - 60000
+  const span = tail - head
+  const step = count > 1 ? Math.max(1000, Math.floor(span / (count - 1))) : 0
+  const list = []
+  for (let index = 0; index < count; index++) {
+    const ms = count > 1 ? tail - index * step : head + Math.floor(span / 2)
+    list.push(formatTime(Math.max(head, Math.min(tail, ms))))
+  }
+  return list
 }
 
 export function isPlaceholder(row) {
@@ -104,6 +131,55 @@ function buildPlaceholderIds(base, lower, count, used) {
   return ids.sort((a, b) => (BigInt(b) > BigInt(a) ? 1 : -1))
 }
 
+/** 懒加载 Miao-Plugin 的崩铁卡池时间轴，缺失时返回空数组（退化为 id 推算时间） */
+let poolWindowsCache = null
+export async function loadPoolWindows() {
+  if (poolWindowsCache) return poolWindowsCache
+  try {
+    const mod = await import(`file://${process.cwd()}/plugins/miao-plugin/resources/meta-sr/info/index.js`)
+    const list = Array.isArray(mod?.poolDetailSr) ? mod.poolDetailSr : []
+    poolWindowsCache = list
+      .map(item => ({
+        from: item.from,
+        to: item.to,
+        start: Date.parse(String(item.from).replace(/-/g, "/")),
+        end: Date.parse(String(item.to).replace(/-/g, "/")),
+      }))
+      .filter(item => Number.isFinite(item.start) && Number.isFinite(item.end))
+      .sort((a, b) => b.start - a.start)
+  } catch {
+    poolWindowsCache = []
+  }
+  return poolWindowsCache
+}
+
+/** 批次前 10 位是秒级时间戳，据此定位它属于哪个卡池 */
+export function findPoolWindow(windows, batch) {
+  const ms = Number(batch) * 1000
+  if (!Number.isFinite(ms)) return null
+  for (const item of windows) {
+    if (ms >= item.start && ms <= item.end) return item
+  }
+  // 批次戳落在两池之间时取最近的一个，避免整批掉进「未知」
+  let best = null
+  let bestGap = Infinity
+  for (const item of windows) {
+    const gap = ms < item.start ? item.start - ms : ms - item.end
+    if (gap < bestGap) {
+      bestGap = gap
+      best = item
+    }
+  }
+  return bestGap <= 3 * 86400000 ? best : null
+}
+
+/**
+ * 占位统一用「光锥」：Miao-Plugin 的 GachaData 不读 rank_type，按 name 查元数据定星级，
+ * 角色分支查不到会 fallback 到 star=4（被算成紫卡），光锥分支 fallback 才是 star=3。
+ * genshin 的 analyse() 只在 rank_type 为 4/5 时读 item_type，故对其无影响。
+ */
+const PLACEHOLDER_ITEM_TYPE = "光锥"
+
 function makePlaceholder({ uid, gachaType, id, itemType }) {
   return {
     uid: String(uid),
@@ -114,7 +190,7 @@ function makePlaceholder({ uid, gachaType, id, itemType }) {
     time: idToTime(id),
     name: PLACEHOLDER_NAME,
     lang: "zh-cn",
-    item_type: itemType,
+    item_type: PLACEHOLDER_ITEM_TYPE,
     rank_type: PLACEHOLDER_RANK,
     id: String(id),
     [PLACEHOLDER_FLAG]: true,
@@ -143,7 +219,7 @@ function makeFiveStar({ uid, gachaType, record }) {
  * 把单个卡池的徽章摘要展开成 genshin 格式条目（id 降序）。
  * 已被 authkey 覆盖的批次整段跳过：那些抽数在本地已有真实逐抽记录。
  */
-export function buildPoolRows({ uid, gachaType, pool, existingIds = new Set(), covered = new Set(), history = [] }) {
+export function buildPoolRows({ uid, gachaType, pool, existingIds = new Set(), covered = new Set(), history = [], windows = [] }) {
   const records = Array.isArray(pool?.records) ? [...pool.records] : []
   records.sort((a, b) => String(b.id).localeCompare(String(a.id)))
   const itemType = gachaType === "12" || gachaType === "22" ? "光锥" : "角色"
@@ -231,7 +307,37 @@ export function buildPoolRows({ uid, gachaType, pool, existingIds = new Set(), c
   }
 
   rows.sort((a, b) => String(b.id).localeCompare(String(a.id)))
+  applyPoolTimeline(rows, windows)
   return { rows, shortfall, skipped, boundary }
+}
+
+/**
+ * 把条目 time 摊到其所属卡池的真实开放区间内。
+ *
+ * 按「解析出的卡池窗口」分组而非按批次：占位 id 在两个五星之间均匀分布，
+ * 跨卡池时批次值会漂移，若按批次分组会切成大量单条组，同一卡池内多组拿到
+ * 相同的中点时间，而 Miao-Plugin 按 time 排序，时间相同会打乱垫抽计数。
+ *
+ * rows 必须已按 id 降序；批次落在卡池空档时沿用上一条的窗口，保证时间连续降序。
+ */
+export function applyPoolTimeline(rows, windows) {
+  if (!rows.length || !windows?.length) return rows
+  const groups = new Map()
+  let lastWindow = null
+  for (const row of rows) {
+    const window = findPoolWindow(windows, batchOf(row.id)) || lastWindow
+    if (!window) continue
+    lastWindow = window
+    const key = window.from
+    if (!groups.has(key)) groups.set(key, { window, list: [] })
+    groups.get(key).list.push(row)
+  }
+  for (const { window, list } of groups.values()) {
+    const timeline = makeTimeline(window, list.length)
+    if (timeline.length !== list.length) continue
+    for (let index = 0; index < list.length; index++) list[index].time = timeline[index]
+  }
+  return rows
 }
 
 /**
@@ -304,7 +410,8 @@ export function hasPlaceholder(userId, uid) {
  * 把徽章摘要同步进 genshin 抽卡记录。
  * 按卡池独立处理：单池异常只跳过该池，不影响其它池已有的占位。
  */
-export function syncSummaryToGenshin({ userId, uid, pools }) {
+export async function syncSummaryToGenshin({ userId, uid, pools }) {
+  const windows = await loadPoolWindows()
   const dir = getSrJsonDir(userId, uid)
   const stats = { pools: 0, five: 0, placeholder: 0, skipped: 0, shortfall: [], boundary: [], errors: [] }
   for (const [gachaType, pool] of Object.entries(pools || {})) {
@@ -315,7 +422,7 @@ export function syncSummaryToGenshin({ userId, uid, pools }) {
       const local = readJson(file)
       const existingIds = new Set(local.map(row => String(row.id)))
       const covered = coveredBatches(local)
-      const { rows, shortfall, skipped, boundary } = buildPoolRows({ uid, gachaType: type, pool, existingIds, covered, history: local })
+      const { rows, shortfall, skipped, boundary } = buildPoolRows({ uid, gachaType: type, pool, existingIds, covered, history: local, windows })
       const merged = mergeRows(local, rows)
       if (merged.length === local.length && !rows.length) continue
       writeJson(file, merged)
