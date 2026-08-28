@@ -16,7 +16,8 @@ export const rule = {
     describe: "用户个人信息查询",
   },
   gclog: {
-    reg: "^#*(更新|获取|导出)抽卡记录$",
+    // #* 只吃 #，星铁前缀会被核心标准化成「#星铁」，故显式允许
+    reg: "^(?:#*|#星铁)(强制)?(更新|获取|导出)抽卡记录$",
     describe: "更新抽卡记录",
   },
   srGclog: {
@@ -151,7 +152,23 @@ export async function gcPaylog(e) {
 }
 export async function gclog(e) {
   let user = new User(e)
-  if (e.isSr) return await srGclog(e)
+  if (e.isSr) {
+    // 崩铁没有可用的 authkey 链路，更新走徽章摘要；导出复用 genshin 的 UIGF 导出
+    if (!/导出|获取/.test(e.msg)) return await srGclog(e)
+    if (await srGachaExportGuard(e)) return true
+    if (e.isGroup && !e.msg.includes("强制")) {
+      e.reply("建议私聊(需加好友)导出，若你确认要在此导出，请发送【*强制导出抽卡记录】", false, { at: true })
+      return true
+    }
+    try {
+      const ExportLog = (await import(`file://${_path}/plugins/genshin/model/exportLog.js`)).default
+      await new ExportLog(e).exportJson()
+    } catch (error) {
+      logger.error(`[崩铁抽卡记录导出] ${error.message}`)
+      e.reply(`崩铁抽卡记录导出失败：${error.message}`)
+    }
+    return true
+  }
   await user.cookie(e)
   let redis_Data = await redis.get(`xiaoyao:gclog:${e.user_id}`)
   if (redis_Data) {
