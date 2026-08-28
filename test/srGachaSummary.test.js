@@ -222,6 +222,12 @@ test("主 Cookie 字段足够，设备字段存在时仍校验一致性", () => 
   assert.throws(() => validateSrCredentials(cookie, "other-device"), /不一致/)
 })
 
+test("兼容扫码绑定保存的旧版 Cookie", () => {
+  const qrCookie = "ltuid=account;ltoken=ltoken;cookie_token=cookie;account_id=account"
+  const credentials = validateSrCredentials(qrCookie)
+  assert.equal(credentials.mainValue, qrCookie)
+})
+
 test("回复返回 error 时不视为成功", () => {
   assert.equal(isSuccessfulReply(undefined), true)
   assert.equal(isSuccessfulReply({ error: new Error("send failed") }), false)

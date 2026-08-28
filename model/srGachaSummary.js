@@ -86,10 +86,8 @@ export function validateSrCredentials(cookie, device) {
   const map = parseCookie(normalizedCookie)
   const required = [
     ["account", ["account_id", "account_id_v2", "ltuid", "ltuid_v2"]],
-    ["ltoken_v2", ["ltoken_v2"]],
-    ["cookie_token_v2", ["cookie_token_v2"]],
-    ["mid", ["account_mid_v2", "ltmid_v2"]],
-    ["mi18nLang", ["mi18nLang"]],
+    ["ltoken", ["ltoken_v2", "ltoken"]],
+    ["cookie_token", ["cookie_token_v2", "cookie_token"]],
   ]
   const missing = required.filter(([, keys]) => !keys.some(key => map.get(key))).map(([name]) => name)
   if (missing.length) {

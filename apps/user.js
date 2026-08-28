@@ -249,7 +249,7 @@ export async function srGclog(e) {
     }
   })
   if (!uid || !cookie) {
-    e.reply(`未找到可用的崩铁米游社 Cookie。需要主 Cookie 中包含账号、登录票据和 mid 字段，${SR_GACHA_REIMPORT_PROMPT}`)
+    e.reply(`未找到可用的崩铁米游社 Cookie。需要包含账号、ltoken 和 cookie_token，${SR_GACHA_REIMPORT_PROMPT}`)
     return true
   }
   e.reply("崩铁五星跃迁摘要获取中，请稍等...")
