@@ -407,6 +407,24 @@ export function hasPlaceholder(userId, uid) {
 }
 
 /**
+ * 该 QQ 名下任一崩铁 UID 是否存在占位条目。
+ * 代发言等场景 `e.user` 可能缺失导致拿不到 uid，此时退化为扫描目录，
+ * 保证导出保护不会因为 uid 解析失败而静默放行。
+ */
+export function hasAnyPlaceholder(userId) {
+  const qq = String(userId)
+  if (!/^[a-zA-Z0-9_-]+$/.test(qq)) return false
+  const base = path.join(process.cwd(), "data", "srJson", qq)
+  let uids
+  try {
+    uids = fs.readdirSync(base)
+  } catch {
+    return false
+  }
+  return uids.some(uid => /^\d+$/.test(uid) && hasPlaceholder(qq, uid))
+}
+
+/**
  * 把徽章摘要同步进 genshin 抽卡记录。
  * 按卡池独立处理：单池异常只跳过该池，不影响其它池已有的占位。
  */

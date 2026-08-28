@@ -8,7 +8,7 @@ import fs from "fs"
 import YAML from "yaml"
 import User from "../model/user.js"
 import { SR_GACHA_COMMAND, SR_GACHA_COOKIE_COMMAND, SR_GACHA_REIMPORT_PROMPT, SrGachaSummary, formatSrSummary, formatSrGachaFailure, getSrGachaCookieFile, isSuccessfulReply, readSrGachaCookie, saveSrGachaCookie, extractSrGachaCookie } from "../model/srGachaSummary.js"
-import { hasPlaceholder, syncSummaryToGenshin } from "../model/srGachaBridge.js"
+import { hasPlaceholder, hasAnyPlaceholder, syncSummaryToGenshin } from "../model/srGachaBridge.js"
 
 export const rule = {
   userInfo: {
@@ -16,8 +16,9 @@ export const rule = {
     describe: "用户个人信息查询",
   },
   gclog: {
-    // #* 只吃 #，星铁前缀会被核心标准化成「#星铁」，故显式允许
-    reg: "^(?:#*|#星铁)(强制)?(更新|获取|导出)抽卡记录$",
+    // dispatch 匹配 e.original_msg：普通链路是标准化后的「#星铁xxx」，
+    // 代发言链路是原始的「*xxx」，两种形态都要接受
+    reg: "^[#*]*(星铁)?(强制)?(更新|获取|导出)抽卡记录$",
     describe: "更新抽卡记录",
   },
   srGclog: {
@@ -29,8 +30,9 @@ export const rule = {
     describe: "绑定崩铁跃迁 Cookie",
   },
   srGachaExportGuard: {
-    // 存在占位条目时禁止导出，避免把不完整数据写进 UIGF 文件
-    reg: "^#?(原神|星铁)?(强制)?导出记录(json)?(v2|v4)?$",
+    // 存在占位条目时禁止导出，避免把不完整数据写进 UIGF 文件。
+    // 同上，需同时匹配「*导出记录」与「#星铁导出记录」
+    reg: "^[#*]*(原神|星铁)?(强制)?导出记录(json)?(v2|v4)?$",
     describe: "崩铁占位记录导出保护",
   },
   gcPaylog: {
@@ -153,7 +155,7 @@ export async function gcPaylog(e) {
 export async function gclog(e) {
   let user = new User(e)
   if (e.isSr) {
-    // 崩铁没有可用的 authkey 链路，更新走徽章接口；导出复用 genshin 的 UIGF 导出
+    // 崩铁没有可用的 sk→authkey 链路，想要直接更新数据得走官方小程序接口；导出复用 genshin 的UIGF导出用于拦截非完整数据
     if (!/导出|获取/.test(e.msg)) return await srGclog(e)
     if (await srGachaExportGuard(e)) return true
     if (e.isGroup && !e.msg.includes("强制")) {
@@ -249,10 +251,10 @@ export async function srGclog(e) {
     }
   })
   if (!uid || !cookie) {
-    e.reply(`未找到可用的崩铁米游社 Cookie。需要包含账号、ltoken 和 cookie_token，${SR_GACHA_REIMPORT_PROMPT}`)
+    e.reply(`未找到可用的崩铁米游社 Cookie。需要包含账号、ltoken 和 cookie_token，${SR_GACHA_REIMPORT_PROMPT}；若不会获取可选择扫码登录`)
     return true
   }
-  e.reply("崩铁五星抽卡记录更新中，请稍等...")
+  e.reply("正在通过官方小程序接口更新五星抽卡记录，请稍等...")
   try {
     const result = await new SrGachaSummary({ uid, cookie }).update()
     const count = Object.values(result.pools).reduce((sum, pool) => sum + pool.records.length, 0)
@@ -538,12 +540,17 @@ function getServer(uid) {
 
 export async function srGachaExportGuard(e) {
   if (!e.isSr) return false
-  const uid = e.user?.getUid ? e.user.getUid("sr") : e.uid
-  if (!uid || !hasPlaceholder(e.user_id, uid)) return false
+  let uid
+  try {
+    uid = e.user?.getUid ? e.user.getUid("sr") : e.uid
+  } catch {}
+  // uid 解析失败时按 QQ 扫描，避免保护被静默跳过
+  const blocked = uid ? hasPlaceholder(e.user_id, uid) : hasAnyPlaceholder(e.user_id)
+  if (!blocked) return false
   e.reply(
     [
       "检测到抽卡记录中存在占位条目，已阻止导出。",
-      "占位条目由崩铁五星抽卡记录生成，用于补齐总抽数，不含四星与三星明细，导出会产生不完整的 UIGF 文件。",
+      "占位条目由崩铁小程序的五星抽卡记录生成，用于补齐总抽数，不含四星与三星明细，导出会产生不完整的 UIGF 文件。",
       "请先在游戏内获取抽卡链接，执行一次全量更新抽卡记录，占位条目会被真实数据整段替换，之后即可正常导出。",
     ].join("\n"),
   )
