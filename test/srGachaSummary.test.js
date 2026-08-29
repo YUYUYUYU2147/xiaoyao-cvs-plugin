@@ -1,11 +1,67 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { SR_GACHA_COMMAND, SR_GACHA_COOKIE_COMMAND, SR_GACHA_REIMPORT_PROMPT, SR_GACHA_POOLS, formatSrGachaFailure, mergeSrSummary, normalizeSrCookie, normalizeSrRecords, SrGachaSummary, getSrRegion, validateSrCredentials, withFileLock, isSuccessfulReply, readSummary, readSrGachaCookie, saveSrGachaCookie, saveSummary, sanitizeSrGachaCookieLog, extractSrGachaCookie } from "../model/srGachaSummary.js"
+import { EventEmitter } from "node:events"
+import { SR_GACHA_COMMAND, SR_GACHA_COOKIE_COMMAND, SR_GACHA_REIMPORT_PROMPT, SR_GACHA_POOLS, formatSrGachaFailure, mergeSrSummary, normalizeSrCookie, normalizeSrRecords, SrGachaSummary, getSrRegion, validateSrCredentials, withFileLock, isSuccessfulReply, readSummary, readSrGachaCookie, saveSrGachaCookie, saveSummary, sanitizeSrGachaCookieLog, extractSrGachaCookie, requestWithSrIpv4 } from "../model/srGachaSummary.js"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
 const cookie = "account_id=account;ltoken_v2=ltoken;cookie_token_v2=cookie;account_mid_v2=mid;e_hkrpg_token=hkrpg;DEVICEFP=fp;_MHYUUID=device-id;mi18nLang=zh-cn"
+
+test("按当前 host 动态轮换 IPv4 并保留 HTTPS 主机名", async () => {
+  const resolverCalls = []
+  const requestCalls = []
+  const resolver = async hostname => {
+    resolverCalls.push(hostname)
+    return [
+      { address: "163.177.118.8", family: 4 },
+      { address: "163.177.118.48", family: 4 },
+    ]
+  }
+  const requestFactory = (target, options, onResponse) => {
+    const request = new EventEmitter()
+    request.end = body => {
+      requestCalls.push({ target: target.toString(), options, body })
+      const response = new EventEmitter()
+      response.statusCode = 200
+      response.headers = {
+        "content-type": "application/json",
+        "set-cookie": ["e_hkrpg_token=fresh-token; Path=/"],
+      }
+      queueMicrotask(() => {
+        onResponse(response)
+        response.emit("data", Buffer.from('{"retcode":0}'))
+        response.emit("end")
+      })
+    }
+    return request
+  }
+
+  const response = await requestWithSrIpv4(
+    "https://act-api-takumi.mihoyo.com/event/rpg_gacha_record/five_star_list",
+    { method: "POST", headers: { Cookie: "cookie" }, body: "{}" },
+    2,
+    resolver,
+    requestFactory,
+  )
+  assert.deepEqual(resolverCalls, ["act-api-takumi.mihoyo.com"])
+  assert.equal(requestCalls.length, 1)
+  assert.equal(requestCalls[0].options.servername, "act-api-takumi.mihoyo.com")
+  const address = await new Promise((resolve, reject) => {
+    requestCalls[0].options.lookup("act-api-takumi.mihoyo.com", {}, (error, value, family) =>
+      error ? reject(error) : resolve({ value, family }),
+    )
+  })
+  assert.deepEqual(address, { value: "163.177.118.48", family: 4 })
+  const allAddresses = await new Promise((resolve, reject) => {
+    requestCalls[0].options.lookup("act-api-takumi.mihoyo.com", { all: true }, (error, value) =>
+      error ? reject(error) : resolve(value),
+    )
+  })
+  assert.deepEqual(allAddresses, [{ address: "163.177.118.48", family: 4 }])
+  assert.equal(response.headers.getSetCookie()[0], "e_hkrpg_token=fresh-token; Path=/")
+  assert.deepEqual(await response.json(), { retcode: 0 })
+})
 
 test("只保留五星，并把 null item 作为垫抽摘要", () => {
   const result = normalizeSrRecords([
@@ -141,7 +197,7 @@ test("更新前用主 Cookie 换取徽章会话，并把新票据用于业务请
   const request = async (url, options) => {
     calls.push({ url, options })
     if (!url.includes("/common/badge/v1/login/account")) {
-      return { ok: true, json: async () => ({ retcode: 0, message: "OK", data: { has_more: false, list: [] } }) }
+    return { ok: true, json: async () => ({ retcode: 0, message: "OK", data: { has_more: false, list: [] } }) }
     }
     return {
       ok: true,
@@ -200,7 +256,7 @@ test("B 服参数使用 prod_qd_cn，国际服和未知池类型明确拒绝", a
   let requestUrl
   const request = async url => {
     requestUrl = url
-    return { ok: true, json: async () => ({ retcode: 0, message: "OK", data: { has_more: false, list: [] } }) }
+      return { ok: true, json: async () => ({ retcode: 0, message: "OK", data: { has_more: false, list: [] } }) }
   }
   await new SrGachaSummary({ uid: "512345678", cookie, request }).fetchPool("GachaType_Newbie")
   const params = new URL(requestUrl).searchParams

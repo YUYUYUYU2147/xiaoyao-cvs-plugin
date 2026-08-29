@@ -1,5 +1,8 @@
 import fs from "node:fs"
 import path from "node:path"
+import { lookup as dnsLookup, resolve4 as dnsResolve4 } from "node:dns/promises"
+import { isIPv4 } from "node:net"
+import https from "node:https"
 import fetch from "node-fetch"
 
 export const SR_GACHA_POOLS = [
@@ -17,6 +20,132 @@ const API_URL = "https://act-api-takumi.mihoyo.com/event/rpg_gacha_record/five_s
 const BADGE_API_URL = "https://api-takumi.mihoyo.com/common/badge/v1/login/account"
 const VALID_REGIONS = ["prod_gf_cn", "prod_qd_cn"]
 const EPHEMERAL_COOKIE_KEYS = ["e_hkrpg_token", "DEVICEFP", "DEVICEFP_SEED_ID", "DEVICEFP_SEED_TIME", "_MHYUUID"]
+
+function getIpv4Addresses(records) {
+  return [
+    ...new Set(
+      (Array.isArray(records) ? records : [])
+        .map(record => (typeof record === "string" ? record : record?.address))
+        .filter(address => isIPv4(address)),
+    ),
+  ]
+}
+
+async function resolveSrHost(hostname) {
+  try {
+    const addresses = getIpv4Addresses(await dnsResolve4(hostname))
+    if (addresses.length) return addresses
+  } catch (error) {
+    const fallback = getIpv4Addresses(
+      await dnsLookup(hostname, { all: true, family: 4, verbatim: true }),
+    )
+    if (fallback.length) return fallback
+    throw error
+  }
+  const fallback = getIpv4Addresses(
+    await dnsLookup(hostname, { all: true, family: 4, verbatim: true }),
+  )
+  if (fallback.length) return fallback
+  throw new Error(`域名 ${hostname} 未解析到 IPv4 地址`)
+}
+
+export async function resolveSrIpv4Addresses(hostname, resolver = resolveSrHost, signal) {
+  if (signal?.aborted) throw new Error("请求已取消")
+  const lookupPromise = Promise.resolve().then(() =>
+    resolver(hostname, { all: true, family: 4, verbatim: true }),
+  )
+  if (!signal) {
+    const addresses = getIpv4Addresses(await lookupPromise)
+    if (!addresses.length) throw new Error(`域名 ${hostname} 未解析到 IPv4 地址`)
+    return addresses
+  }
+  let abortHandler
+  const abortPromise = new Promise((_, reject) => {
+    abortHandler = () => reject(new Error("请求已取消"))
+    signal.addEventListener("abort", abortHandler, { once: true })
+    if (signal.aborted) abortHandler()
+  })
+  try {
+    const addresses = getIpv4Addresses(await Promise.race([lookupPromise, abortPromise]))
+    if (!addresses.length) throw new Error(`域名 ${hostname} 未解析到 IPv4 地址`)
+    return addresses
+  } finally {
+    signal.removeEventListener("abort", abortHandler)
+  }
+}
+
+function createResponseHeaders(rawHeaders) {
+  const headers = new Map(
+    Object.entries(rawHeaders || {})
+      .filter(([, value]) => value != null)
+      .map(([name, value]) => [name.toLowerCase(), value]),
+  )
+  return {
+    get(name) {
+      const value = headers.get(String(name).toLowerCase())
+      return value == null ? null : Array.isArray(value) ? value.join(", ") : String(value)
+    },
+    getSetCookie() {
+      const value = headers.get("set-cookie")
+      return Array.isArray(value) ? value.map(String) : value ? [String(value)] : []
+    },
+    raw() {
+      return Object.fromEntries(
+        [...headers].map(([name, value]) => [
+          name,
+          Array.isArray(value) ? value.map(String) : [String(value)],
+        ]),
+      )
+    },
+  }
+}
+
+export async function requestWithSrIpv4(
+  url,
+  options = {},
+  attempt = 1,
+  resolver = resolveSrHost,
+  requestFactory = https.request,
+) {
+  const target = new URL(url)
+  if (target.protocol !== "https:") return fetch(url, options)
+  const addresses = await resolveSrIpv4Addresses(target.hostname, resolver, options.signal)
+  const address = addresses[(Math.max(1, attempt) - 1) % addresses.length]
+  return await new Promise((resolve, reject) => {
+    const request = requestFactory(
+      target,
+      {
+        method: options.method || "GET",
+        headers: options.headers,
+        signal: options.signal,
+        servername: target.hostname,
+        lookup: (_hostname, lookupOptions, callback) =>
+          lookupOptions?.all
+            ? callback(null, [{ address, family: 4 }])
+            : callback(null, address, 4),
+        agent: new https.Agent({ keepAlive: false }),
+      },
+      response => {
+        const chunks = []
+        response.on("data", chunk => chunks.push(Buffer.from(chunk)))
+        response.on("error", reject)
+        response.on("end", () => {
+          const body = Buffer.concat(chunks).toString("utf8")
+          const text = async () => body
+          resolve({
+            ok: response.statusCode >= 200 && response.statusCode < 300,
+            status: response.statusCode || 0,
+            headers: createResponseHeaders(response.headers),
+            text,
+            json: async () => JSON.parse(await text()),
+          })
+        })
+      },
+    )
+    request.on("error", reject)
+    request.end(options.body)
+  })
+}
 
 function parseCookie(cookie) {
   return new Map(
@@ -289,11 +418,13 @@ function describeFetchError(error) {
 }
 
 /** 米哈游接口走昆仑 CDN，部分节点从境外主机不可达，失败后重试可命中其它节点 */
-async function requestWithRetry(request, url, options, { retries = 3, delay = 800, label = "请求" } = {}) {
+async function requestWithRetry(request, url, options, { retries = 3, delay = 800, label = "请求", resolveHost } = {}) {
   let last
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const response = await request(url, options)
+      const response = resolveHost
+        ? await requestWithSrIpv4(url, options, attempt, resolveHost)
+        : await request(url, options)
       if (!response?.ok) throw new Error(`HTTP ${response?.status || "请求失败"}`)
       return response
     } catch (error) {
@@ -306,7 +437,7 @@ async function requestWithRetry(request, url, options, { retries = 3, delay = 80
 }
 
 export class SrGachaSummary {
-  constructor({ uid, cookie, device = "", region = getSrRegion(uid), request = fetch, file, timeoutMs = 30000 } = {}) {
+  constructor({ uid, cookie, device = "", region = getSrRegion(uid), request = fetch, resolveHost, file, timeoutMs = 30000 } = {}) {
     if (!uid || !cookie) throw new Error("未找到崩铁 UID 或 Cookie")
     this.uid = String(uid)
     const credentials = validateSrCredentials(cookie, device)
@@ -316,6 +447,7 @@ export class SrGachaSummary {
     if (!VALID_REGIONS.includes(region) || region !== getSrRegion(this.uid)) throw new Error("仅支持崩铁国服官服或 B 服，区服与 UID 不匹配")
     this.region = region
     this.request = request
+    this.resolveHost = resolveHost === undefined && request === fetch ? resolveSrHost : resolveHost
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("请求超时必须是有限正数")
     this.timeoutMs = timeoutMs
     this.file = file || path.join(process.cwd(), "data", "srGachaSummary", `${this.uid}.json`)
@@ -345,7 +477,7 @@ export class SrGachaSummary {
           }),
           signal: controller.signal,
         },
-        { label: "崩铁徽章会话换取" },
+        { label: "崩铁徽章会话换取", resolveHost: this.resolveHost },
       )
       const reply = await response.json()
       if (reply?.retcode !== 0 || reply?.message !== "OK") {
@@ -399,7 +531,7 @@ export class SrGachaSummary {
             },
             signal: controller.signal,
           },
-          { label: `请求${gachaType}` },
+          { label: `请求${gachaType}`, resolveHost: this.resolveHost },
         )
         response = await response.json()
       } catch (error) {
