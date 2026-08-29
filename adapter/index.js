@@ -28,8 +28,9 @@ export class atlas extends plugin {
       this.e.user_id = this.e.operator_id
       this.e.msg = "#poke#"
     }
-    this.e.original_msg = this.e.original_msg || this.e.msg
-    if (this.e.original_msg.includes("绑定跃迁Cookie")) {
+    const originalMsg = String(this.e.original_msg || this.e.msg || "")
+    this.e.original_msg = originalMsg
+    if (originalMsg.includes("绑定跃迁Cookie")) {
       this.e.logText = sanitizeSrGachaCookieLog(this.e.logText)
     }
   }
