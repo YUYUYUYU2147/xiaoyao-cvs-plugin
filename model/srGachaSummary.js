@@ -49,7 +49,7 @@ async function resolveSrHost(hostname) {
   throw new Error(`域名 ${hostname} 未解析到 IPv4 地址`)
 }
 
-export async function resolveSrIpv4Addresses(hostname, resolver = resolveSrHost, signal) {
+async function resolveSrIpv4Addresses(hostname, resolver = resolveSrHost, signal) {
   if (signal?.aborted) throw new Error("请求已取消")
   const lookupPromise = Promise.resolve().then(() =>
     resolver(hostname, { all: true, family: 4, verbatim: true }),
@@ -100,7 +100,7 @@ function createResponseHeaders(rawHeaders) {
   }
 }
 
-export async function requestWithSrIpv4(
+async function requestWithSrIpv4(
   url,
   options = {},
   attempt = 1,
