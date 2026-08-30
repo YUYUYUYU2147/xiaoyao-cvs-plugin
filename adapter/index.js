@@ -2,6 +2,7 @@ import plugin from "../../../lib/plugins/plugin.js"
 import * as Atlas from "../apps/index.js"
 import { render } from "./render.js"
 import { checkAuth, getMysApi } from "./mys.js"
+import { sanitizeSrGachaCookieLog } from "../model/srGachaSummary.js"
 
 export class atlas extends plugin {
   constructor(e) {
@@ -27,7 +28,11 @@ export class atlas extends plugin {
       this.e.user_id = this.e.operator_id
       this.e.msg = "#poke#"
     }
-    this.e.original_msg = this.e.original_msg || this.e.msg
+    const originalMsg = String(this.e.original_msg || this.e.msg || "")
+    this.e.original_msg = originalMsg
+    if (originalMsg.includes("绑定跃迁Cookie")) {
+      this.e.logText = sanitizeSrGachaCookieLog(this.e.logText)
+    }
   }
   async dispatch(e) {
     let msg = e.original_msg || ""

@@ -55,7 +55,7 @@ git clone https://github.com/Ctrlcvs/xiaoyao-cvs-plugin.git ./plugins/xiaoyao-cv
 9. 发送 #崩坏3签到 可签到崩坏3游戏模块 具体支持【崩坏3、原神、崩坏2、未定义事件。绝区零】。
 10. 发送 #云原神签到 可签到云原神游戏。
 11. 默认配置文件位于 ./plugins/xiaoyao-cvs-plugin/defSet/config/config.yaml
-12. 支持stoken绑定以及相关的操作。如：【#更新抽卡记录】
+12. 支持stoken绑定以及相关的操作。如：原神使用【#更新抽卡记录】，崩铁使用【*更新抽卡记录】。
 
 ##后续计划
 关于插件兼容以及支持问题：
