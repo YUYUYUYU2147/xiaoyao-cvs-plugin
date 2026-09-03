@@ -235,28 +235,50 @@ export async function srGclog(e) {
     e.reply("未找到已绑定的崩铁 UID，请先绑定崩铁账号")
     return true
   }
-  const candidateCookies = [readSrGachaCookie(getSrGachaCookieFile(e.user_id)), e.cookie]
+  // 优先用会被「刷新ck」自动维护的凭据，手工绑定的跃迁 Cookie 仅作兜底：
+  // 后者字段齐全但票据可能早已过期，若排在前面会永久占位导致换票失败。
   const user = new User(e)
+  const candidateCookies = [mysUser?.ck]
   try {
     const cookieData = await user.getCookie(e)
-    candidateCookies.push(cookieData?.cookie, e.cookie)
+    candidateCookies.push(cookieData?.cookie)
   } catch {}
-  candidateCookies.push(mysUser?.ck)
-  const cookie = candidateCookies.find(value => {
+  candidateCookies.push(e.cookie, readSrGachaCookie(getSrGachaCookieFile(e.user_id)))
+
+  // 字段校验只能判断格式，判不出票据是否失效，必须逐个真实换票才能选出可用凭据
+  const clients = []
+  for (const value of candidateCookies) {
+    if (!value) continue
     try {
-      new SrGachaSummary({ uid, cookie: value })
-      return true
-    } catch {
-      return false
-    }
-  })
-  if (!uid || !cookie) {
+      clients.push(new SrGachaSummary({ uid, cookie: value }))
+    } catch {}
+  }
+  if (!uid || !clients.length) {
     e.reply(`未找到可用的崩铁米游社 Cookie。需要包含账号、ltoken 和 cookie_token，${SR_GACHA_REIMPORT_PROMPT}；若不会获取可选择扫码登录`)
     return true
   }
   e.reply("正在通过官方小程序接口更新五星抽卡记录，请稍等...")
+  let client
+  let lastError
+  for (const candidate of clients) {
+    try {
+      await candidate.refreshBadgeSession()
+      client = candidate
+      break
+    } catch (error) {
+      lastError = error
+    }
+  }
+  if (!client) {
+    logger.error(`[崩铁五星抽卡记录] 所有候选 Cookie 换票失败：${lastError?.message}`)
+    e.reply(
+      `崩铁五星抽卡记录获取失败：${lastError?.message || "徽章会话换取失败"}\n` +
+        `已绑定的 Cookie 可能已过期，可先发送 #刷新ck 更新，或${SR_GACHA_REIMPORT_PROMPT}`,
+    )
+    return true
+  }
   try {
-    const result = await new SrGachaSummary({ uid, cookie }).update()
+    const result = await client.update()
     const count = Object.values(result.pools).reduce((sum, pool) => sum + pool.records.length, 0)
     const pity = Object.values(result.pools).filter(pool => pool.pity).map(pool => `${pool.name}${pool.pity.gacha_count}抽`).join("、")
     const detail = formatSrSummary(result)
