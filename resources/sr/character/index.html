@@ -27,14 +27,14 @@
             {{ else }}
             <div>
                 {{/if}}
-                <img src="{{_layout_path}}sr/{{portrait}}" alt="">
+                <img src="{{miao_portrait || (_layout_path + 'sr/' + portrait)}}" alt="">
             </div>
                 {{if isTopImg }}
                 <div style="transform: scale(1.2);top:{{isTopImg}}px">
                     {{ else }}
                     <div>
                  {{/if}}
-                <img src="{{_layout_path}}sr/{{portrait}}" alt="">
+                <img src="{{miao_portrait || (_layout_path + 'sr/' + portrait)}}" alt="">
             </div>
         </div>
         <div class="body-top-zz">

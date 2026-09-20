@@ -3,6 +3,7 @@ import { currentVersion, yunzaiVersion, isV3 } from "./Changelog.js"
 export const render = async function (path, params, cfg) {
   let paths = path.split("/")
   let { render, e } = cfg
+  let miao_path = process.cwd() + "/plugins/miao-plugin/resources/meta-sr"
   let _layout_path = process.cwd() + "/plugins/xiaoyao-cvs-plugin/resources/"
   let layout_path = process.cwd() + "/plugins/xiaoyao-cvs-plugin/resources/common/layout/"
   if (paths.length > 2) {
@@ -15,6 +16,7 @@ export const render = async function (path, params, cfg) {
     {
       ...params,
       _layout_path,
+      miao_path,
       _tpl_path: process.cwd() + "/plugins/xiaoyao-cvs-plugin/resources/common/tpl/",
       defaultLayout: layout_path + "default.html",
       elemLayout: layout_path + "elem.html",

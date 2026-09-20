@@ -7,6 +7,35 @@ import Common from "../components/Common.js";
 
 const _path = process.cwd();
 let pathPlus = `${_path}/plugins/xiaoyao-cvs-plugin/resources/sr/`
+let miaoMetaPath = `${_path}/plugins/miao-plugin/resources/meta-sr`
+
+/** miao 数据缓存 */
+let _miaoCharData = null
+let _miaoWeaponData = null
+
+/**
+ * 拼接 miao-plugin 图片完整路径，文件不存在时返回空字符串
+ * （模板中会通过 {{miao_portrait || 本地图源}} 回退到插件自带资源）
+ */
+let miaoImg = (relPath) => {
+    if (!relPath) return ""
+    let fullPath = `${miaoMetaPath}/${relPath}`
+    return fs.existsSync(fullPath) ? fullPath : ""
+}
+
+/** 角色立绘：miao 存放于 meta-sr/character/{角色名}/imgs/splash.webp */
+let getMiaoRolePortrait = (id) => {
+    if (!_miaoCharData) _miaoCharData = Data.readJSON(miaoMetaPath, "character/data.json")
+    let name = _miaoCharData?.[id]?.name
+    return miaoImg(name ? `character/${name}/imgs/splash.webp` : "")
+}
+
+/** 光锥立绘：miao 存放于 meta-sr/weapon/{命途}/{光锥名}/splash.webp */
+let getMiaoWeaponPortrait = (id) => {
+    if (!_miaoWeaponData) _miaoWeaponData = Data.readJSON(miaoMetaPath, "weapon/data.json")
+    let item = _miaoWeaponData?.[id]
+    return miaoImg(item?.name && item?.type ? `weapon/${item.type}/${item.name}/splash.webp` : "")
+}
 
 export async function AtlasAlias(e, {render}) {
     let data
@@ -139,6 +168,7 @@ export async function GetRoleData(e) {
     data.materials = newMaterial
     data.baseAttr=baseAttr
     data.growAttr=growAttr
+    data.miao_portrait = getMiaoRolePortrait(data.id)
     return {data,url: 'sr/character/index'}
 }
 
@@ -208,6 +238,7 @@ export async function GetWeaPonData(e) {
             suitRole.push(list)
         }
         roleData.suitRole = suitRole
+        roleData.miao_portrait = getMiaoWeaponPortrait(roleData.id)
     }
     return {data: roleData, url: `sr/weapon/index`}
 

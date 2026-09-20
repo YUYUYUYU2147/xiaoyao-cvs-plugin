@@ -56,6 +56,11 @@ img {
     height: 100%;
 }
 
+/* miao 立绘画布宽高比不统一（方图 ~ 超宽图），按方框裁切避免拉伸变形 */
+.body-top-left img {
+    object-fit: cover;
+}
+
 .container {
     width: 1600px;
     background-color: rgb(230, 230, 230);
