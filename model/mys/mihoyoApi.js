@@ -12,6 +12,7 @@ import {
 } from '../../components/Changelog.js';
 import fetch from "node-fetch"
 import mys from "./mysTool.js"
+import mhyFetch from './mhyFetch.js'
 import crypto from "crypto";
 const _path = process.cwd();
 const DEVICE_ID = utils.randomString(32).toUpperCase();
@@ -100,7 +101,10 @@ export default class miHoYoApi {
 		let response = {}
 		let start = Date.now()
 		try {
-			response = await fetch(url, param)
+			// 走统一出口：默认直连，被米游社风控拦了才自动改走代理。
+			// 之前这里裸奔，撞风控时返回 405 + HTML 阻断页，报出来的是
+			// 「Missing parameters」，让人误以为是参数配错了。
+			response = await mhyFetch(url, param)
 		} catch (error) {
 			logger.error(error.toString())
 			return false

@@ -429,9 +429,19 @@ export async function bindStoken(e, uid = "") {
     e.region = getServer(e.uid)
     res = await user.getData("bbsGetCookie", { cookies: e.cks, method: "post" }, false)
     if (!res?.data) {
-      await e.reply(
-        `绑定Stoken失败，异常：${res?.message}\n请发送【stoken帮助】查看配置教程重新配置~`,
-      )
+      // getData 返回 false 表示请求本身就失败了（风控/超时），不是 stoken 不对。
+      // 这时把它当「参数缺失」报出去会让人以为要重新配置，其实配置是好的。
+      if (res === false || res === undefined || res === null) {
+        await e.reply(
+          "绑定Stoken失败：请求没能送达米游社。\n" +
+            "多数情况是访问太频繁被临时限制（稍等几分钟重试即可，配置不用动），\n" +
+            "也可能是网络问题。稍后再试一次；若反复失败请检查网络或联系管理员。",
+        )
+      } else {
+        await e.reply(
+          `绑定Stoken失败，异常：${res?.message}\n请发送【stoken帮助】查看配置教程重新配置~`,
+        )
+      }
       return true
     } else {
       await user.seachUid(res)
