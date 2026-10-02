@@ -105,7 +105,9 @@ async function tryBind(e, ck) {
   const oldReply = e.reply, oldRaw = e.raw_message, oldMsg = e.msg
   const msgs = []
   e.reply = msg => {
-    if (Array.isArray(msg)) msgs.push(...msg)
+    // genshin 是一次性把「绑定Cookie成功\n」「角色列表」「\n使用命令说明」
+    // 传过来的，换行符就在元素里，摊平会被发成三条独立消息
+    if (Array.isArray(msg)) msgs.push(msg.join(''))
     else msgs.push(msg)
   }
   ;(e.ck = ck), (e.msg = ck), (e.raw_message = ck)
