@@ -106,8 +106,11 @@ async function tryBind(e, ck) {
   const msgs = []
   e.reply = msg => {
     // genshin 是一次性把「绑定Cookie成功\n」「角色列表」「\n使用命令说明」
-    // 传过来的，换行符就在元素里，摊平会被发成三条独立消息
-    if (Array.isArray(msg)) msgs.push(msg.join(''))
+    // 传过来的，换行符就在元素里，摊平会被发成多条独立消息。
+    // 但数组里若混着 segment（按钮、合并转发），join 会把它们压成
+    // [object Object]，这种情况保持原样交给框架处理。
+    if (Array.isArray(msg) && msg.every(x => typeof x === 'string')) msgs.push(msg.join(''))
+    else if (Array.isArray(msg)) msgs.push(...msg)
     else msgs.push(msg)
   }
   ;(e.ck = ck), (e.msg = ck), (e.raw_message = ck)
@@ -139,7 +142,11 @@ export async function bindSkCK(e, res) {
   for (const ck of cks) {
     const r = await tryBind(e, ck)
     if (r.ok) {
-      for (const m of r.msgs) await e.reply(m)
+      // 一次性发出去。逐条 e.reply 的写法在这里等于把一次回复拆成多条，
+      // 以后 tryBind 里多调几次 e.reply 就会跟着变多。
+      // 全是纯文本才拼接；混着 segment 时保持数组原样。
+      const allText = r.msgs.every(m => typeof m === 'string')
+      await e.reply(allText ? (r.msgs.length === 1 ? r.msgs[0] : r.msgs.join('\n')) : r.msgs)
       break
     }
   }
