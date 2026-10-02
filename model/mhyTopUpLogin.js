@@ -1,6 +1,17 @@
 import User from "./user.js";
 import utils from './mys/utils.js';
 import Common from "../components/Common.js";
+
+function maskQrLog(res = {}) {
+    return JSON.stringify(res, (key, value) => {
+        if (key === "token" && typeof value === "string") return `${value.slice(0, 8)}...已隐藏`
+        if (key === "mobile" && typeof value === "string") return value.replace(/^(\d{3}).*(\d{2})$/, "$1******$2")
+        if (key === "email" && typeof value === "string" && value) return value.replace(/^(.{2}).*(@.*)$/, "$1****$2")
+        if (key === "identity_code" && typeof value === "string") return "已隐藏"
+        return value
+    })
+}
+
 export default class mysTopLogin {
     constructor(e) {
         this.e = e;
@@ -43,12 +54,12 @@ export default class mysTopLogin {
                 device: this.device, ticket
             },false)
             if (res?.data?.status == "Scanned" && RedisData.GetQrCode == 1) {
-                Bot.logger.mark(JSON.stringify(res))
+                Bot.logger.mark(maskQrLog(res))
                 await this.e.reply("二维码已扫描，请确认登录", true)
                 RedisData.GetQrCode++;
             }
             if (res?.data?.status == "Confirmed") {
-                Bot.logger.mark(JSON.stringify(res))
+                Bot.logger.mark(maskQrLog(res))
                 break
             }
         }
@@ -64,10 +75,34 @@ export default class mysTopLogin {
             await this.e.reply("stoken获取不完整请重新扫码", true);
             return false
         }
-        let UserData =  await this.user.getData("bbsGetCookie", {cookies:`stoken=${token}&uid=${uid}&mid=${mid}`},false)
-        let stoken =`stoken=${token};stuid=${uid};mid=${mid}`
+        const stoken = `stoken=${token};stuid=${uid};mid=${mid}`
+        const stokenCookie = `${stoken};`
+        let UserData =  await this.user.getData("bbsGetCookie", {
+            cookies:`stoken=${encodeURIComponent(token)}&uid=${encodeURIComponent(uid)}&mid=${encodeURIComponent(mid)}`,
+            headers: { Cookie: stokenCookie },
+        },false)
+        let LtokenData = await this.user.getData("getLtoken", {
+            cookies: stokenCookie,
+            headers: { Cookie: stokenCookie },
+        }, false)
+        const ltoken = LtokenData?.data?.ltoken || LtokenData?.data?.ltoken_v2 || ""
+        // genshin/model/user.js:82 只在 cookie_token_v2 存在且带 account_mid_v2 或
+        // ltmid_v2 时才走 v2 分支，据此拼它能识别的格式。
+        // 但 v2 的值不能靠改名得到：bbsGetCookie 返回的仍是 cookie_token，
+        // getLtoken 返回的仍是 ltoken。把 v1 的值塞进 v2 字段，genshin 会照
+        // flagV2 分支拿它去校验，比走老格式失败得更快。故只在扫码响应里真的
+        // 带回了 v2 字段时才拼 v2，否则沿用老格式。
+        const ctV2 = UserData?.data?.cookie_token_v2
+        const ltV2 = LtokenData?.data?.ltoken_v2
+        const hasV2 = !!(ctV2 && ltV2 && mid)
+        const ct = UserData?.data?.cookie_token || ctV2 || ""
+        const oldCookie = ct && ltoken ? `ltoken=${ltoken};ltuid=${uid};cookie_token=${ct};account_id=${uid};` : ""
         return {
-            cookie: `ltoken=${token};ltuid=${uid};cookie_token=${UserData.data?.cookie_token}`,
+            cookie: hasV2
+                ? `ltuid=${uid};account_mid_v2=${mid};cookie_token_v2=${ctV2};ltoken_v2=${ltV2};ltmid_v2=${mid};`
+                : oldCookie,
+            //两份都留着：v2 被米游社拒了还能回退老格式再试一次
+            oldCookie,
             stoken
         }
     }

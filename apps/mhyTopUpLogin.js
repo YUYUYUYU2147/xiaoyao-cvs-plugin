@@ -98,16 +98,49 @@ export async function UserPassLogin(e) {
   return res
 }
 
+//试一次 genshin 的 CK 绑定，把回复收下来自己判断成败。
+//genshin 内部校验不过时直接往 e.reply 抛「绑定Cookie失败：…」，
+//放行的话用户会以为扫码绑定失败——可 stoken 此时早已绑好。
+async function tryBind(e, ck) {
+  const oldReply = e.reply, oldRaw = e.raw_message, oldMsg = e.msg
+  const msgs = []
+  e.reply = msg => {
+    if (Array.isArray(msg)) msgs.push(...msg)
+    else msgs.push(msg)
+  }
+  ;(e.ck = ck), (e.msg = ck), (e.raw_message = ck)
+  try {
+    if (isV3) {
+      let userck = (await import(`file://${_path}/plugins/genshin/model/user.js`)).default
+      await new userck(e).bing()
+    } else {
+      let { bingCookie } = await import(`file://${_path}/lib/app/dailyNote.js`)
+      await bingCookie(e)
+    }
+  } catch (err) {
+    msgs.push(String(err))
+  } finally {
+    ;(e.reply = oldReply), (e.raw_message = oldRaw), (e.msg = oldMsg)
+  }
+  const text = msgs.map(m => String(Array.isArray(m) ? m.join('\n') : m)).join('\n')
+  return { ok: !/绑定Cookie失败|绑定cookie失败|Cookie错误|数据错误/.test(text), msgs }
+}
+
 export async function bindSkCK(e, res) {
   ;(e.msg = res?.stoken), (e.raw_message = res?.stoken)
   e.isPrivate = true
   await bindStoken(e, "1")
-  ;(e.ck = res?.cookie), (e.msg = res.cookie), (e.raw_message = res.cookie)
-  if (isV3) {
-    let userck = (await import(`file://${_path}/plugins/genshin/model/user.js`)).default
-    await new userck(e).bing()
-  } else {
-    let { bingCookie } = await import(`file://${_path}/lib/app/dailyNote.js`)
-    await bingCookie(e)
+  if (!res?.cookie || /cookie_token(_v2)?=(undefined|null)?\s*$/i.test(res.cookie)) return true
+  //res.cookie 优先用 genshin 能识别的格式，被拒再回退另一份
+  const cks = [res.cookie]
+  if (res?.oldCookie && res.oldCookie !== res.cookie) cks.push(res.oldCookie)
+  for (const ck of cks) {
+    const r = await tryBind(e, ck)
+    if (r.ok) {
+      for (const m of r.msgs) await e.reply(m)
+      break
+    }
   }
+  //两次都失败也不报：stoken 绑定已经成功，报「绑定Cookie失败」只会误导
+  return true
 }
