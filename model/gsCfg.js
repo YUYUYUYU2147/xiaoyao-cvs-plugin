@@ -167,24 +167,26 @@ class GsCfg {
     if (lodash.isEmpty(data)) {
       fs.existsSync(file) && fs.unlinkSync(file)
     } else {
-      fs.exists(file, exists => {
-        if (!exists) {
-          fs.writeFileSync(file, "", "utf8")
-        }
-        let ck = fs.readFileSync(file, "utf-8")
-        let yaml = YAML.stringify(data)
-        ck = YAML.parse(ck)
-        if (ck?.uid || !ck) {
-          fs.writeFileSync(file, yaml, "utf8")
-        } else {
-          if (!ck[Object.keys(data)[0]]) {
-            ck = YAML.stringify(ck)
-            fs.writeFileSync(file, yaml + ck, "utf8")
-          } else {
-            ck[Object.keys(data)[0]] = data[Object.keys(data)[0]]
-            fs.writeFileSync(file, YAML.stringify(ck), "utf8")
+      fs.existsSync(file, exists => {
+        // 改为「解析→合并→整体重写」。原写法是把新 UID 的 YAML 与旧内容的 YAML 字符串
+        // 直接拼接（fs.writeFileSync(file, yaml + ck)），既没有分隔符也没有真正合并：
+        // 当旧内容解析出空对象时，YAML.stringify({}) 得到的是字面量 "{}"，
+        // 会被拼到文件尾部，之后 YAML.parse 就抛
+        // 「Implicit map keys need to be followed by map values」。
+        let old = {}
+        if (exists) {
+          try {
+            old = YAML.parse(fs.readFileSync(file, "utf-8")) || {}
+          } catch (err) {
+            // 旧文件已损坏：留档后重建，避免直接覆盖后无法回溯
+            logger.warn(`[xiaoyao] ${file} 解析失败，已备份：${err.message}`)
+            try { fs.renameSync(file, `${file}.bad.${Date.now()}`) } catch {}
+            old = {}
           }
         }
+        // 兼容单条记录未套 uid 键的旧格式
+        if (old.uid) old = { [old.uid]: old }
+        fs.writeFileSync(file, YAML.stringify(Object.assign({}, old, data)), "utf8")
       })
     }
   }
